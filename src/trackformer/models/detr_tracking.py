@@ -103,6 +103,9 @@ class DETRTrackingBase(nn.Module):
 
                 prev_target_ind_for_fps = torch.randperm(num_prev_target_ind)[:num_prev_target_ind_for_fps]
 
+                if len(not_prev_out_ind) == 0:
+                    prev_target_ind_for_fps = []    
+
                 # for j, prev_box_matched in enumerate(prev_boxes_matched):
                 #     if j not in prev_target_ind_for_fps:
                 #         continue
