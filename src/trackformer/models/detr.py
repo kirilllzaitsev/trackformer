@@ -357,6 +357,38 @@ class SetCriterion(nn.Module):
         }
         return losses
 
+    def loss_rot(self, outputs, targets, indices, num_boxes):
+        """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
+        targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+        The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
+        """
+        idx = self._get_src_permutation_idx(indices)
+        src_rots = outputs['rot'][idx]
+        target_rots = torch.cat([t['rot'][i] for t, (_, i) in zip(targets, indices)], dim=0)
+
+        losses = {}
+        loss_rot = F.mse_loss(src_rots, target_rots, reduction="none")
+        losses["loss_rot"] = loss_rot.sum() / num_boxes
+
+        losses = {k: v.sum() / num_boxes for k, v in losses.items()}
+        return losses
+
+    def loss_t(self, outputs, targets, indices, num_boxes):
+        """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
+        targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+        The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
+        """
+        idx = self._get_src_permutation_idx(indices)
+        src_ts = outputs['t'][idx]
+        target_ts = torch.cat([t['t'][i] for t, (_, i) in zip(targets, indices)], dim=0)
+
+        losses = {}
+        loss_t = F.mse_loss(src_ts, target_ts, reduction="none")
+        losses["loss_t"] = loss_t.sum() / num_boxes
+
+        losses = {k: v.sum() / num_boxes for k, v in losses.items()}
+        return losses
+
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
         batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
@@ -375,6 +407,8 @@ class SetCriterion(nn.Module):
             'cardinality': self.loss_cardinality,
             'boxes': self.loss_boxes,
             'masks': self.loss_masks,
+            'rot': self.loss_rot,
+            't': self.loss_t,
         }
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
         return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
@@ -404,7 +438,6 @@ class SetCriterion(nn.Module):
         losses = {}
         for loss in self.losses:
             losses.update(self.get_loss(loss, outputs, targets, indices, num_boxes))
-        losses['indices'] = indices
         losses['indices'] = indices
 
         # In case of auxiliary losses, we repeat this process with the
