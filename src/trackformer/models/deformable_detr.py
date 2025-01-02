@@ -15,11 +15,15 @@ import math
 
 import torch
 import torch.nn.functional as F
+from pose_tracking.utils.misc import print_cls
 from torch import nn
-
-from ..util import box_ops
-from ..util.misc import NestedTensor, inverse_sigmoid, nested_tensor_from_tensor_list
-from .detr import DETR, PostProcess, SetCriterion
+from trackformer.models.detr import DETR, PostProcess, SetCriterion
+from trackformer.util import box_ops
+from trackformer.util.misc import (
+    NestedTensor,
+    inverse_sigmoid,
+    nested_tensor_from_tensor_list,
+)
 
 
 def _get_clones(module, N):
@@ -30,7 +34,7 @@ class DeformableDETR(DETR):
     """ This is the Deformable DETR module that performs object detection """
     def __init__(self, backbone, transformer, num_classes, num_queries, num_feature_levels,
                  aux_loss=True, with_box_refine=False, two_stage=False, overflow_boxes=False,
-                 multi_frame_attention=False, multi_frame_encoding=False, merge_frame_features=False):
+                 multi_frame_attention=False, multi_frame_encoding=False, merge_frame_features=False, use_pose=False):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -43,7 +47,7 @@ class DeformableDETR(DETR):
             with_box_refine: iterative bounding box refinement
             two_stage: two-stage Deformable DETR
         """
-        super().__init__(backbone, transformer, num_classes, num_queries, aux_loss)
+        super().__init__(backbone, transformer, num_classes, num_queries, aux_loss, use_pose=use_pose)
 
         self.merge_frame_features = merge_frame_features
         self.multi_frame_attention = multi_frame_attention
@@ -98,6 +102,9 @@ class DeformableDETR(DETR):
         if with_box_refine:
             self.class_embed = _get_clones(self.class_embed, num_pred)
             self.bbox_embed = _get_clones(self.bbox_embed, num_pred)
+            if self.use_pose:
+                self.rot_embed = _get_clones(self.rot_embed, num_pred)
+                self.t_embed = _get_clones(self.t_embed, num_pred)
             nn.init.constant_(self.bbox_embed[0].layers[-1].bias.data[2:], -2.0)
             # hack implementation for iterative bounding box refinement
             self.transformer.decoder.bbox_embed = self.bbox_embed
@@ -105,6 +112,9 @@ class DeformableDETR(DETR):
             nn.init.constant_(self.bbox_embed.layers[-1].bias.data[2:], -2.0)
             self.class_embed = nn.ModuleList([self.class_embed for _ in range(num_pred)])
             self.bbox_embed = nn.ModuleList([self.bbox_embed for _ in range(num_pred)])
+            if self.use_pose:
+                self.rot_embed = nn.ModuleList([self.rot_embed for _ in range(num_pred)])
+                self.t_embed = nn.ModuleList([self.t_embed for _ in range(num_pred)])
             self.transformer.decoder.bbox_embed = None
         if two_stage:
             # hack implementation for two-stage
@@ -228,6 +238,8 @@ class DeformableDETR(DETR):
 
         outputs_classes = []
         outputs_coords = []
+        outputs_rots = []
+        outputs_ts = []
         for lvl in range(hs.shape[0]):
             if lvl == 0:
                 reference = init_reference
@@ -244,6 +256,11 @@ class DeformableDETR(DETR):
             outputs_coord = tmp.sigmoid()
             outputs_classes.append(outputs_class)
             outputs_coords.append(outputs_coord)
+            if self.use_pose:
+                outputs_rot = self.rot_embed[lvl](hs[lvl])
+                outputs_t = self.t_embed[lvl](hs[lvl])
+                outputs_rots.append(outputs_rot)
+                outputs_ts.append(outputs_t)
         outputs_class = torch.stack(outputs_classes)
         outputs_coord = torch.stack(outputs_coords)
 
@@ -251,8 +268,17 @@ class DeformableDETR(DETR):
                'pred_boxes': outputs_coord[-1],
                'hs_embed': hs[-1]}
 
+        if self.use_pose:
+            outputs_rot = torch.stack(outputs_rots)
+            outputs_t = torch.stack(outputs_ts)
+            out['rot'] = outputs_rot[-1]
+            out['t'] = outputs_t[-1]
+        else:
+            outputs_rot = None
+            outputs_t = None
+
         if self.aux_loss:
-            out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
+            out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord, outputs_rot, outputs_t)
 
         if self.two_stage:
             enc_outputs_coord = enc_outputs_coord_unact.sigmoid()
@@ -275,12 +301,21 @@ class DeformableDETR(DETR):
         return out, targets, features_all, memory, hs
 
     @torch.jit.unused
-    def _set_aux_loss(self, outputs_class, outputs_coord):
+    def _set_aux_loss(
+        self, outputs_class, outputs_coord, outputs_rot=None, outputs_t=None
+    ):
         # this is a workaround to make torchscript happy, as torchscript
         # doesn't support dictionary with non-homogeneous values, such
         # as a dict having both a Tensor and a list.
-        return [{'pred_logits': a, 'pred_boxes': b}
-                for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
+        res = []
+        for i in range(len(outputs_class) - 1):
+            res_lvl = {"pred_logits": outputs_class[i], "pred_boxes": outputs_coord[i]}
+            if outputs_rot is not None:
+                res_lvl["rot"] = outputs_rot[i]
+            if outputs_t is not None:
+                res_lvl["t"] = outputs_t[i]
+            res.append(res_lvl)
+        return res
 
 
 class DeformablePostProcess(PostProcess):
