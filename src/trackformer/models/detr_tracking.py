@@ -2,14 +2,15 @@ import math
 import random
 from contextlib import nullcontext
 
+from pose_tracking.utils.common import cast_to_torch
 import torch
 import torch.nn as nn
 from pose_tracking.utils.misc import print_cls
-from ..util import box_ops
-from ..util.misc import NestedTensor, get_rank
-from .deformable_detr import DeformableDETR
-from .detr import DETR
-from .matcher import HungarianMatcher
+from trackformer.models.deformable_detr import DeformableDETR
+from trackformer.models.detr import DETR
+from trackformer.models.matcher import HungarianMatcher
+from trackformer.util import box_ops
+from trackformer.util.misc import NestedTensor, get_rank
 
 
 class DETRTrackingBase(nn.Module):
@@ -260,12 +261,13 @@ class DETRTrackingBase(nn.Module):
                     prev_outputs_without_aux = {
                         k: v for k, v in prev_out.items() if 'aux_outputs' not in k}
                     prev_indices = self._matcher(prev_outputs_without_aux, prev_targets)
+                    prev_indices = cast_to_torch(prev_indices, device=prev_out['pred_boxes'].device)
 
                     self.add_track_queries_to_targets(
                         targets,
                         prev_indices,
                         prev_out,
-                        add_false_pos=False,
+                        add_false_pos=True,
                     )
             else:
                 # if not training we do not add track queries and evaluate detection performance only.
