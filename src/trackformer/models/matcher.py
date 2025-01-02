@@ -7,7 +7,7 @@ import torch
 from scipy.optimize import linear_sum_assignment
 from torch import nn
 
-from ..util.box_ops import box_cxcywh_to_xyxy, generalized_box_iou
+from trackformer.util.box_ops import box_cxcywh_to_xyxy, generalized_box_iou
 
 
 class HungarianMatcher(nn.Module):
@@ -132,6 +132,13 @@ class HungarianMatcher(nn.Module):
 
 
 def build_matcher(args):
+    if getattr(args, "opt_only", None) is not None:
+        if "labels" not in args.opt_only:
+            args.set_cost_class = 0
+        if "boxes" not in args.opt_only:
+            args.set_cost_bbox = 0
+            args.set_cost_giou = 0
+            
     return HungarianMatcher(
         cost_class=args.set_cost_class,
         cost_bbox=args.set_cost_bbox,
