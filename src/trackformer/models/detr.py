@@ -6,19 +6,26 @@ import copy
 
 import torch
 import torch.nn.functional as F
+from pose_tracking.utils.misc import print_cls
 from torch import nn
-
-from ..util import box_ops
-from ..util.misc import (NestedTensor, accuracy, dice_loss, get_world_size,
-                         interpolate, is_dist_avail_and_initialized,
-                         nested_tensor_from_tensor_list, sigmoid_focal_loss)
+from trackformer.util import box_ops
+from trackformer.util.misc import (
+    NestedTensor,
+    accuracy,
+    dice_loss,
+    get_world_size,
+    interpolate,
+    is_dist_avail_and_initialized,
+    nested_tensor_from_tensor_list,
+    sigmoid_focal_loss,
+)
 
 
 class DETR(nn.Module):
     """ This is the DETR module that performs object detection. """
 
     def __init__(self, backbone, transformer, num_classes, num_queries,
-                 aux_loss=False, overflow_boxes=False):
+                 aux_loss=False, overflow_boxes=False, use_pose=False):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -31,12 +38,18 @@ class DETR(nn.Module):
         """
         super().__init__()
 
+        self.use_pose = use_pose
+
         self.num_queries = num_queries
         self.transformer = transformer
         self.overflow_boxes = overflow_boxes
         self.class_embed = nn.Linear(self.hidden_dim, num_classes + 1)
         self.bbox_embed = MLP(self.hidden_dim, self.hidden_dim, 4, 3)
         self.query_embed = nn.Embedding(num_queries, self.hidden_dim)
+
+        if use_pose:
+            self.rot_embed = MLP(self.hidden_dim, self.hidden_dim, 4, 2)
+            self.t_embed = MLP(self.hidden_dim, self.hidden_dim, 3, 2)
 
         # match interface with deformable DETR
         self.input_proj = nn.Conv2d(backbone.num_channels[-1], self.hidden_dim, kernel_size=1)
@@ -121,19 +134,40 @@ class DETR(nn.Module):
                'pred_boxes': outputs_coord[-1],
                'hs_embed': hs_without_norm[-1]}
 
+        if self.use_pose:
+            outputs_rot = self.rot_embed(hs)
+            outputs_t = self.t_embed(hs)
+            out['rot'] = outputs_rot[-1]
+            out['t'] = outputs_t[-1]
+        else:
+            outputs_rot = None
+            outputs_t = None
+
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(
-                outputs_class, outputs_coord)
+                outputs_class, outputs_coord, outputs_rot, outputs_t)
 
         return out, targets, features, memory, hs
 
     @torch.jit.unused
-    def _set_aux_loss(self, outputs_class, outputs_coord):
+    def _set_aux_loss(
+        self, outputs_class, outputs_coord, outputs_rot=None, outputs_t=None
+    ):
         # this is a workaround to make torchscript happy, as torchscript
         # doesn't support dictionary with non-homogeneous values, such
         # as a dict having both a Tensor and a list.
-        return [{'pred_logits': a, 'pred_boxes': b}
-                for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
+        res = []
+        for i in range(len(outputs_class) - 1):
+            res_lvl = {"pred_logits": outputs_class[i], "pred_boxes": outputs_coord[i]}
+            if outputs_rot is not None:
+                res_lvl["rot"] = outputs_rot[i]
+            if outputs_t is not None:
+                res_lvl["t"] = outputs_t[i]
+            res.append(res_lvl)
+        return res
+
+    def __repr__(self):
+        return print_cls(self, extra_str=super().__repr__())
 
 
 class SetCriterion(nn.Module):
