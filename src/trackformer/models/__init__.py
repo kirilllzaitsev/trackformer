@@ -1,29 +1,34 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import torch
+from trackformer.models.backbone import build_backbone
+from trackformer.models.deformable_detr import DeformableDETR, DeformablePostProcess
+from trackformer.models.deformable_transformer import build_deforamble_transformer
+from trackformer.models.detr import DETR, PostProcess, SetCriterion
+from trackformer.models.detr_segmentation import (
+    DeformableDETRSegm,
+    DeformableDETRSegmTracking,
+    DETRSegm,
+    DETRSegmTracking,
+    PostProcessPanoptic,
+    PostProcessSegm,
+)
+from trackformer.models.detr_tracking import DeformableDETRTracking, DETRTracking
+from trackformer.models.matcher import build_matcher
+from trackformer.models.transformer import build_transformer
 
-from .backbone import build_backbone
-from .deformable_detr import DeformableDETR, DeformablePostProcess
-from .deformable_transformer import build_deforamble_transformer
-from .detr import DETR, PostProcess, SetCriterion
-from .detr_segmentation import (DeformableDETRSegm, DeformableDETRSegmTracking,
-                                DETRSegm, DETRSegmTracking,
-                                PostProcessPanoptic, PostProcessSegm)
-from .detr_tracking import DeformableDETRTracking, DETRTracking
-from .matcher import build_matcher
-from .transformer import build_transformer
 
-
-def build_model(args):
-    if args.dataset == 'coco':
-        num_classes = 91
-    elif args.dataset == 'coco_panoptic':
-        num_classes = 250
-    elif args.dataset in ['coco_person', 'mot', 'mot_crowdhuman', 'crowdhuman', 'mot_coco_person']:
-        # num_classes = 91
-        num_classes = 20
-        # num_classes = 1
-    else:
-        raise NotImplementedError
+def build_model(args, num_classes=None):
+    if num_classes is None:
+        if args.dataset == 'coco':
+            num_classes = 91
+        elif args.dataset == 'coco_panoptic':
+            num_classes = 250
+        elif args.dataset in ['coco_person', 'mot', 'mot_crowdhuman', 'crowdhuman', 'mot_coco_person']:
+            # num_classes = 91
+            num_classes = 20
+            # num_classes = 1
+        else:
+            raise NotImplementedError
 
     device = torch.device(args.device)
     backbone = build_backbone(args)
@@ -34,6 +39,7 @@ def build_model(args):
         'num_classes': num_classes - 1 if args.focal_loss else num_classes,
         'num_queries': args.num_queries,
         'aux_loss': args.aux_loss,
+        'use_pose': all(x in getattr(args, "opt_only", []) for x in ['rot', 't']),
         'overflow_boxes': args.overflow_boxes}
 
     tracking_kwargs = {
@@ -82,9 +88,36 @@ def build_model(args):
             else:
                 model = DETR(**detr_kwargs)
 
+    criterion = build_criterion(args, num_classes, matcher, device)
+
+    if args.focal_loss:
+        postprocessors = {'bbox': DeformablePostProcess()}
+    else:
+        postprocessors = {'bbox': PostProcess()}
+    if args.masks:
+        postprocessors['segm'] = PostProcessSegm()
+        if args.dataset == "coco_panoptic":
+            is_thing_map = {i: i <= 90 for i in range(201)}
+            postprocessors["panoptic"] = PostProcessPanoptic(is_thing_map, threshold=0.85)
+
+    return model, criterion, postprocessors
+
+
+def build_criterion(args, num_classes, matcher, device):
     weight_dict = {'loss_ce': args.cls_loss_coef,
                    'loss_bbox': args.bbox_loss_coef,
-                   'loss_giou': args.giou_loss_coef,}
+                   'loss_giou': args.giou_loss_coef,
+                   "loss_rot": getattr(args, "rot_loss_coef", 1),
+                   "loss_t": getattr(args, "t_loss_coef", 1)}
+                   
+    losses = [
+        "labels",
+        "boxes",
+        "rot",
+        "t",
+    ]
+    if getattr(args, "opt_only", None) is not None:
+        losses = [v for v in losses if v in args.opt_only]
 
     if args.masks:
         weight_dict["loss_mask"] = args.mask_loss_coef
@@ -100,7 +133,7 @@ def build_model(args):
             aux_weight_dict.update({k + f'_enc': v for k, v in weight_dict.items()})
         weight_dict.update(aux_weight_dict)
 
-    losses = ['labels', 'boxes', 'cardinality']
+    losses += ['cardinality']
     if args.masks:
         losses.append('masks')
 
@@ -116,15 +149,4 @@ def build_model(args):
         tracking=args.tracking,
         track_query_false_positive_eos_weight=args.track_query_false_positive_eos_weight,)
     criterion.to(device)
-
-    if args.focal_loss:
-        postprocessors = {'bbox': DeformablePostProcess()}
-    else:
-        postprocessors = {'bbox': PostProcess()}
-    if args.masks:
-        postprocessors['segm'] = PostProcessSegm()
-        if args.dataset == "coco_panoptic":
-            is_thing_map = {i: i <= 90 for i in range(201)}
-            postprocessors["panoptic"] = PostProcessPanoptic(is_thing_map, threshold=0.85)
-
-    return model, criterion, postprocessors
+    return criterion
