@@ -59,7 +59,7 @@ class DETR(nn.Module):
         return self.backbone.num_channels[:3][::-1]
         # return [1024, 512, 256]
 
-    def forward(self, samples: NestedTensor, targets: list = None):
+    def forward(self, samples: NestedTensor, targets: list = None, prev_features=None):
         """ The forward expects a NestedTensor, which consists of:
                - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
                - samples.mask: a binary mask of shape [batch_size x H x W],
@@ -404,6 +404,8 @@ class SetCriterion(nn.Module):
         losses = {}
         for loss in self.losses:
             losses.update(self.get_loss(loss, outputs, targets, indices, num_boxes))
+        losses['indices'] = indices
+        losses['indices'] = indices
 
         # In case of auxiliary losses, we repeat this process with the
         # output of each intermediate layer.

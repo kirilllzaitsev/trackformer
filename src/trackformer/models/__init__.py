@@ -34,12 +34,13 @@ def build_model(args, num_classes=None):
     backbone = build_backbone(args)
     matcher = build_matcher(args)
 
+    opt_only = getattr(args, "opt_only", None)
     detr_kwargs = {
         'backbone': backbone,
         'num_classes': num_classes - 1 if args.focal_loss else num_classes,
         'num_queries': args.num_queries,
         'aux_loss': args.aux_loss,
-        'use_pose': all(x in getattr(args, "opt_only", []) for x in ['rot', 't']),
+        'use_pose': opt_only is None or all(x in opt_only for x in ['rot', 't']),
         'overflow_boxes': args.overflow_boxes}
 
     tracking_kwargs = {
