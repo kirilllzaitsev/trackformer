@@ -4,7 +4,7 @@ from contextlib import nullcontext
 
 import torch
 import torch.nn as nn
-
+from pose_tracking.utils.misc import print_cls
 from ..util import box_ops
 from ..util.misc import NestedTensor, get_rank
 from .deformable_detr import DeformableDETR
@@ -258,7 +258,12 @@ class DETRTrackingBase(nn.Module):
                         k: v for k, v in prev_out.items() if 'aux_outputs' not in k}
                     prev_indices = self._matcher(prev_outputs_without_aux, prev_targets)
 
-                    self.add_track_queries_to_targets(targets, prev_indices, prev_out)
+                    self.add_track_queries_to_targets(
+                        targets,
+                        prev_indices,
+                        prev_out,
+                        add_false_pos=False,
+                    )
             else:
                 # if not training we do not add track queries and evaluate detection performance only.
                 # tracking performance is evaluated by the actual tracking evaluation.
@@ -275,6 +280,9 @@ class DETRTrackingBase(nn.Module):
         out, targets, features, memory, hs  = super().forward(samples, targets, prev_features)
 
         return out, targets, features, memory, hs
+
+    def __repr__(self) -> str:
+        return print_cls(self, excluded_attrs=[], extra_str=super().__repr__())
 
 
 # TODO: with meta classes

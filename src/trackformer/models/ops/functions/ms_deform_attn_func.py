@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 
-import MultiScaleDeformableAttention as MSDA
+import MultiScaleDeformableAttention_trackformer as MSDA
 
 
 class MSDeformAttnFunction(Function):
