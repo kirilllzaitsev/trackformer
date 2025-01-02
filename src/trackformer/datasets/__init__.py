@@ -7,10 +7,13 @@ from pycocotools.coco import COCO
 from torch.utils.data import Dataset, Subset
 from torchvision.datasets import CocoDetection
 
-from .coco import build as build_coco
-from .crowdhuman import build_crowdhuman
-from .mot import build_mot, build_mot_crowdhuman, build_mot_coco_person
-
+from trackformer.datasets.coco import build as build_coco
+from trackformer.datasets.crowdhuman import build_crowdhuman
+from trackformer.datasets.mot import (
+    build_mot,
+    build_mot_coco_person,
+    build_mot_crowdhuman,
+)
 
 def get_coco_api_from_dataset(dataset: Subset) -> COCO:
     """Return COCO class from PyTorch dataset for evaluation with COCO eval."""

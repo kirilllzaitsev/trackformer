@@ -14,8 +14,8 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from ..coco import make_coco_transforms
-from ..transforms import Compose
+from trackformer.datasets.coco import make_coco_transforms
+from trackformer.datasets.transforms import Compose
 
 
 class MOT17Sequence(Dataset):

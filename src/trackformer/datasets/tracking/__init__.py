@@ -2,4 +2,4 @@
 """
 Submodule interface.
 """
-from .factory import TrackDatasetFactory
+from trackformer.datasets.tracking.factory import TrackDatasetFactory

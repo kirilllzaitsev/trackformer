@@ -13,17 +13,17 @@ import torch.nn.functional as F
 from PIL import Image
 from torch import Tensor
 
-from ..util import box_ops
-from ..util.misc import NestedTensor, interpolate
+from trackformer.util import box_ops
+from trackformer.util.misc import NestedTensor, interpolate
 
 try:
     from panopticapi.utils import id2rgb, rgb2id
 except ImportError:
     pass
 
-from .deformable_detr import DeformableDETR
-from .detr import DETR
-from .detr_tracking import DETRTrackingBase
+from trackformer.models.deformable_detr import DeformableDETR
+from trackformer.models.detr import DETR
+from trackformer.models.detr_tracking import DETRTrackingBase
 
 
 class DETRSegmBase(nn.Module):

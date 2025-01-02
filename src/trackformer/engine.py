@@ -11,14 +11,14 @@ from typing import Iterable
 import torch
 from track import ex
 
-from .datasets import get_coco_api_from_dataset
-from .datasets.coco_eval import CocoEvaluator
-from .datasets.panoptic_eval import PanopticEvaluator
-from .models.detr_segmentation import DETRSegm
-from .util import misc as utils
-from .util.box_ops import box_iou
-from .util.track_utils import evaluate_mot_accums
-from .vis import vis_results
+from trackformer.datasets import get_coco_api_from_dataset
+from trackformer.datasets.coco_eval import CocoEvaluator
+from trackformer.datasets.panoptic_eval import PanopticEvaluator
+from trackformer.models.detr_segmentation import DETRSegm
+from trackformer.util import misc as utils
+from trackformer.util.box_ops import box_iou
+from trackformer.util.track_utils import evaluate_mot_accums
+from trackformer.vis import vis_results
 
 
 def make_results(outputs, targets, postprocessors, tracking, return_only_orig=True):

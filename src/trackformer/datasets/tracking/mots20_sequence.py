@@ -11,7 +11,7 @@ from typing import Optional, Tuple
 import numpy as np
 import pycocotools.mask as rletools
 
-from .mot17_sequence import MOT17Sequence
+from trackformer.datasets.tracking.mot17_sequence import MOT17Sequence
 
 
 class MOTS20Sequence(MOT17Sequence):

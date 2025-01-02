@@ -9,11 +9,12 @@ import torch.nn.functional as F
 import torchvision
 from torch import nn
 from torchvision.models._utils import IntermediateLayerGetter
-from torchvision.ops.feature_pyramid_network import (FeaturePyramidNetwork,
-                                                     LastLevelMaxPool)
-
-from ..util.misc import NestedTensor, is_main_process
-from .position_encoding import build_position_encoding
+from torchvision.ops.feature_pyramid_network import (
+    FeaturePyramidNetwork,
+    LastLevelMaxPool,
+)
+from trackformer.models.position_encoding import build_position_encoding
+from trackformer.util.misc import NestedTensor, is_main_process
 
 
 class FrozenBatchNorm2d(torch.nn.Module):

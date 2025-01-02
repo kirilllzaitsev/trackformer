@@ -3,7 +3,7 @@
 MOT20 sequence dataset.
 """
 
-from .mot17_sequence import MOT17Sequence
+from trackformer.datasets.tracking.mot17_sequence import MOT17Sequence
 
 
 class MOT20Sequence(MOT17Sequence):

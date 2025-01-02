@@ -2,7 +2,7 @@
 import json
 import os
 
-from ..util import misc as utils
+from trackformer.util import misc as utils
 
 try:
     from panopticapi.evaluation import pq_compute

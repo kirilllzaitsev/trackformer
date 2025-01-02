@@ -10,7 +10,7 @@ from matplotlib import pyplot as plt
 from torchvision.ops.boxes import clip_boxes_to_image
 from visdom import Visdom
 
-from .util.plot_utils import fig_to_numpy
+from trackformer.util.plot_utils import fig_to_numpy
 
 logging.getLogger('visdom').setLevel(logging.CRITICAL)
 

@@ -13,9 +13,9 @@ import torch
 from torch import nn
 from torch.nn.init import constant_, normal_, xavier_uniform_
 
-from ..util.misc import inverse_sigmoid
-from .ops.modules import MSDeformAttn
-from .transformer import _get_clones, _get_activation_fn
+from trackformer.models.ops.modules import MSDeformAttn
+from trackformer.models.transformer import _get_activation_fn, _get_clones
+from trackformer.util.misc import inverse_sigmoid
 
 
 class DeformableTransformer(nn.Module):

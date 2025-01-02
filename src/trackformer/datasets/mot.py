@@ -11,10 +11,10 @@ from pathlib import Path
 
 import torch
 
-from . import transforms as T
-from .coco import CocoDetection, make_coco_transforms
-from .coco import build as build_coco
-from .crowdhuman import build_crowdhuman
+from trackformer.datasets import transforms as T
+from trackformer.datasets.coco import CocoDetection, make_coco_transforms
+from trackformer.datasets.coco import build as build_coco
+from trackformer.datasets.crowdhuman import build_crowdhuman
 
 
 class MOT(CocoDetection):

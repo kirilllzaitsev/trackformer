@@ -4,7 +4,7 @@ CrowdHuman dataset with tracking training augmentations.
 """
 from pathlib import Path
 
-from .coco import CocoDetection, make_coco_transforms
+from trackformer.datasets.coco import CocoDetection, make_coco_transforms
 
 
 def build_crowdhuman(image_set, args):

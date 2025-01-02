@@ -4,9 +4,9 @@ MOT wrapper which combines sequences to a dataset.
 """
 from torch.utils.data import Dataset
 
-from .mot17_sequence import MOT17Sequence
-from .mot20_sequence import MOT20Sequence
-from .mots20_sequence import MOTS20Sequence
+from trackformer.datasets.tracking.mot17_sequence import MOT17Sequence
+from trackformer.datasets.tracking.mot20_sequence import MOT20Sequence
+from trackformer.datasets.tracking.mots20_sequence import MOTS20Sequence
 
 
 class MOT17Wrapper(Dataset):

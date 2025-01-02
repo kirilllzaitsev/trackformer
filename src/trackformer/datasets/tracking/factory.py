@@ -6,8 +6,8 @@ from typing import Union
 
 from torch.utils.data import ConcatDataset
 
-from .demo_sequence import DemoSequence
-from .mot_wrapper import MOT17Wrapper, MOT20Wrapper, MOTS20Wrapper
+from trackformer.datasets.tracking.demo_sequence import DemoSequence
+from trackformer.datasets.tracking.mot_wrapper import MOT17Wrapper, MOT20Wrapper, MOTS20Wrapper
 
 DATASETS = {}
 

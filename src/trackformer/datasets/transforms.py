@@ -10,8 +10,8 @@ import torch
 import torchvision.transforms as T
 import torchvision.transforms.functional as F
 
-from ..util.box_ops import box_xyxy_to_cxcywh
-from ..util.misc import interpolate
+from trackformer.util.box_ops import box_xyxy_to_cxcywh
+from trackformer.util.misc import interpolate
 
 
 def crop(image, target, region, overflow_boxes=False):

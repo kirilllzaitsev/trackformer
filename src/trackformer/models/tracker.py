@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
 from torchvision.ops.boxes import clip_boxes_to_image, nms, box_iou
 
-from ..util.box_ops import box_xyxy_to_cxcywh
+from trackformer.util.box_ops import box_xyxy_to_cxcywh
 
 
 class Tracker:
