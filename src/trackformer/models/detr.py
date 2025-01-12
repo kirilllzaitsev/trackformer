@@ -22,11 +22,22 @@ from trackformer.util.misc import (
 
 
 class DETR(nn.Module):
-    """ This is the DETR module that performs object detection. """
+    """This is the DETR module that performs object detection."""
 
-    def __init__(self, backbone, transformer, num_classes, num_queries,
-                 aux_loss=False, overflow_boxes=False, use_pose=False):
-        """ Initializes the model.
+    def __init__(
+        self,
+        backbone,
+        transformer,
+        num_classes,
+        num_queries,
+        aux_loss=False,
+        overflow_boxes=False,
+        use_pose=False,
+        rot_out_dim=4,
+        t_out_dim=3,
+        dropout=0.0,
+    ):
+        """Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
             transformer: torch module of the transformer architecture. See transformer.py
@@ -39,6 +50,10 @@ class DETR(nn.Module):
         super().__init__()
 
         self.use_pose = use_pose
+        self.rot_out_dim = rot_out_dim
+        self.t_out_dim = t_out_dim
+
+        self.do_predict_2d_t = t_out_dim == 2
 
         self.num_queries = num_queries
         self.transformer = transformer
@@ -48,8 +63,15 @@ class DETR(nn.Module):
         self.query_embed = nn.Embedding(num_queries, self.hidden_dim)
 
         if use_pose:
-            self.rot_embed = MLP(self.hidden_dim, self.hidden_dim, 4, 2)
-            self.t_embed = MLP(self.hidden_dim, self.hidden_dim, 3, 2)
+            self.rot_embed = MLP(self.hidden_dim, self.hidden_dim, rot_out_dim, 2)
+            self.t_embed = MLP(self.hidden_dim, self.hidden_dim, t_out_dim, 2)
+        if self.do_predict_2d_t:
+            self.depth_embed = MLP(
+                input_dim=self.hidden_dim,
+                output_dim=1,
+                hidden_dim=self.hidden_dim,
+                num_layers=2,
+            )
 
         # match interface with deformable DETR
         self.input_proj = nn.Conv2d(backbone.num_channels[-1], self.hidden_dim, kernel_size=1)
@@ -164,7 +186,7 @@ class DETR(nn.Module):
 
     @torch.jit.unused
     def _set_aux_loss(
-        self, outputs_class, outputs_coord, outputs_rot=None, outputs_t=None
+        self, outputs_class, outputs_coord, outputs_rot=None, outputs_t=None, outputs_depth=None
     ):
         # this is a workaround to make torchscript happy, as torchscript
         # doesn't support dictionary with non-homogeneous values, such
@@ -176,6 +198,8 @@ class DETR(nn.Module):
                 res_lvl["rot"] = outputs_rot[i]
             if outputs_t is not None:
                 res_lvl["t"] = outputs_t[i]
+            if outputs_depth is not None:
+                res_lvl["center_depth"] = outputs_depth[i]
             res.append(res_lvl)
         return res
 
