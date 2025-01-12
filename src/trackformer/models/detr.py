@@ -134,20 +134,33 @@ class DETR(nn.Module):
                'pred_boxes': outputs_coord[-1],
                'hs_embed': hs_without_norm[-1]}
 
+        forward_pose_heads_res = self.forward_pose_heads(hs, out)
+
+        if self.aux_loss:
+            out["aux_outputs"] = self._set_aux_loss(
+                outputs_class, outputs_coord, **forward_pose_heads_res,
+            )
+
+        return out, targets, features, memory, hs
+
+    def forward_pose_heads(self, hs, out):
+        outputs_depth = None
         if self.use_pose:
             outputs_rot = self.rot_embed(hs)
             outputs_t = self.t_embed(hs)
-            out['rot'] = outputs_rot[-1]
-            out['t'] = outputs_t[-1]
+            out["rot"] = outputs_rot[-1]
+            out["t"] = outputs_t[-1]
+            if self.do_predict_2d_t:
+                outputs_depth = self.depth_embed(hs)
+                out["center_depth"] = outputs_depth[-1]
         else:
             outputs_rot = None
             outputs_t = None
-
-        if self.aux_loss:
-            out['aux_outputs'] = self._set_aux_loss(
-                outputs_class, outputs_coord, outputs_rot, outputs_t)
-
-        return out, targets, features, memory, hs
+        return {
+            "outputs_rot": outputs_rot,
+            "outputs_t": outputs_t,
+            "outputs_depth": outputs_depth,
+        }
 
     @torch.jit.unused
     def _set_aux_loss(
