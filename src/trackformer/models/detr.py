@@ -213,9 +213,22 @@ class SetCriterion(nn.Module):
         1) we compute hungarian assignment between ground truth boxes and the outputs of the model
         2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
     """
-    def __init__(self, num_classes, matcher, weight_dict, eos_coef, losses,
-                 focal_loss, focal_alpha, focal_gamma, tracking, track_query_false_positive_eos_weight):
-        """ Create the criterion.
+
+    def __init__(
+        self,
+        num_classes,
+        matcher,
+        weight_dict,
+        eos_coef,
+        losses,
+        focal_loss,
+        focal_alpha,
+        focal_gamma,
+        tracking,
+        track_query_false_positive_eos_weight,
+        t_out_dim=3,
+    ):
+        """Create the criterion.
         Parameters:
             num_classes: number of object categories, omitting the special no-object category
             matcher: module able to compute a matching between targets and proposals
@@ -233,12 +246,15 @@ class SetCriterion(nn.Module):
         self.losses = losses
         empty_weight = torch.ones(self.num_classes + 1)
         empty_weight[-1] = self.eos_coef
-        self.register_buffer('empty_weight', empty_weight)
+        self.register_buffer("empty_weight", empty_weight)
         self.focal_loss = focal_loss
         self.focal_alpha = focal_alpha
         self.focal_gamma = focal_gamma
         self.tracking = tracking
-        self.track_query_false_positive_eos_weight = track_query_false_positive_eos_weight
+        self.track_query_false_positive_eos_weight = (
+            track_query_false_positive_eos_weight
+        )
+        self.t_out_dim = t_out_dim
 
     def loss_labels(self, outputs, targets, indices, _, log=True):
         """Classification loss (NLL)
@@ -434,8 +450,10 @@ class SetCriterion(nn.Module):
         The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
         """
         idx = self._get_src_permutation_idx(indices)
-        src_rots = outputs['rot'][idx]
-        target_rots = torch.cat([t['rot'][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        src_rots = outputs["rot"][idx]
+        target_rots = torch.cat(
+            [t["rot"][i] for t, (_, i) in zip(targets, indices)], dim=0
+        )
 
         losses = {}
         loss_rot = F.mse_loss(src_rots, target_rots, reduction="none")
@@ -450,10 +468,18 @@ class SetCriterion(nn.Module):
         The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
         """
         idx = self._get_src_permutation_idx(indices)
-        src_ts = outputs['t'][idx]
-        target_ts = torch.cat([t['t'][i] for t, (_, i) in zip(targets, indices)], dim=0)
-
+        src_ts = outputs["t"][idx]
         losses = {}
+        if self.t_out_dim == 2:
+            src_depths = outputs["center_depth"][idx]
+            target_depths = torch.cat([t["center_depth"][i] for t, (_, i) in zip(targets, indices)], dim=0)
+            loss_depth = F.mse_loss(src_depths, target_depths, reduction="none")
+            losses["loss_depth"] = loss_depth.sum() / num_boxes
+            tgt_key = "xy"
+        else:
+            tgt_key = "t"
+
+        target_ts = torch.cat([t[tgt_key][i] for t, (_, i) in zip(targets, indices)], dim=0)
         loss_t = F.mse_loss(src_ts, target_ts, reduction="none")
         losses["loss_t"] = loss_t.sum() / num_boxes
 
