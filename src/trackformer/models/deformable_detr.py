@@ -34,7 +34,8 @@ class DeformableDETR(DETR):
     """ This is the Deformable DETR module that performs object detection """
     def __init__(self, backbone, transformer, num_classes, num_queries, num_feature_levels,
                  aux_loss=True, with_box_refine=False, two_stage=False, overflow_boxes=False,
-                 multi_frame_attention=False, multi_frame_encoding=False, merge_frame_features=False, use_pose=False):
+                 multi_frame_attention=False, multi_frame_encoding=False, merge_frame_features=False, use_pose=False,
+                 rot_out_dim=4, t_out_dim=3,):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -47,7 +48,8 @@ class DeformableDETR(DETR):
             with_box_refine: iterative bounding box refinement
             two_stage: two-stage Deformable DETR
         """
-        super().__init__(backbone, transformer, num_classes, num_queries, aux_loss, use_pose=use_pose)
+        super().__init__(backbone, transformer, num_classes, num_queries, aux_loss, use_pose=use_pose,
+                         rot_out_dim=rot_out_dim, t_out_dim=t_out_dim)
 
         self.merge_frame_features = merge_frame_features
         self.multi_frame_attention = multi_frame_attention
@@ -240,6 +242,7 @@ class DeformableDETR(DETR):
         outputs_coords = []
         outputs_rots = []
         outputs_ts = []
+        outputs_depths = []
         for lvl in range(hs.shape[0]):
             if lvl == 0:
                 reference = init_reference
@@ -261,6 +264,9 @@ class DeformableDETR(DETR):
                 outputs_t = self.t_embed[lvl](hs[lvl])
                 outputs_rots.append(outputs_rot)
                 outputs_ts.append(outputs_t)
+                if self.do_predict_2d_t:
+                    outputs_depth = self.depth_mlp(hs[lvl])
+                    outputs_depths.append(outputs_depth)
         outputs_class = torch.stack(outputs_classes)
         outputs_coord = torch.stack(outputs_coords)
 
@@ -268,17 +274,22 @@ class DeformableDETR(DETR):
                'pred_boxes': outputs_coord[-1],
                'hs_embed': hs[-1]}
 
+        outputs_depth = None
         if self.use_pose:
             outputs_rot = torch.stack(outputs_rots)
             outputs_t = torch.stack(outputs_ts)
             out['rot'] = outputs_rot[-1]
             out['t'] = outputs_t[-1]
+            if self.do_predict_2d_t:
+                outputs_depth = torch.stack(outputs_depths)
+                out["center_depth"] = outputs_depth[-1]
         else:
             outputs_rot = None
             outputs_t = None
+            outputs_depth = None
 
         if self.aux_loss:
-            out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord, outputs_rot, outputs_t)
+            out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord, outputs_rot, outputs_t, outputs_depth)
 
         if self.two_stage:
             enc_outputs_coord = enc_outputs_coord_unact.sigmoid()
@@ -302,7 +313,7 @@ class DeformableDETR(DETR):
 
     @torch.jit.unused
     def _set_aux_loss(
-        self, outputs_class, outputs_coord, outputs_rot=None, outputs_t=None
+        self, outputs_class, outputs_coord, outputs_rot=None, outputs_t=None, outputs_depth=None
     ):
         # this is a workaround to make torchscript happy, as torchscript
         # doesn't support dictionary with non-homogeneous values, such
@@ -314,6 +325,8 @@ class DeformableDETR(DETR):
                 res_lvl["rot"] = outputs_rot[i]
             if outputs_t is not None:
                 res_lvl["t"] = outputs_t[i]
+            if outputs_depth is not None:
+                res_lvl["center_depth"] = outputs_depth[i]
             res.append(res_lvl)
         return res
 
