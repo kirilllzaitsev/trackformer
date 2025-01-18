@@ -40,7 +40,9 @@ def build_model(args, num_classes=None):
         'num_classes': num_classes - 1 if args.focal_loss else num_classes,
         'num_queries': args.num_queries,
         'aux_loss': args.aux_loss,
-        'use_pose': opt_only is None or all(x in opt_only for x in ['rot', 't']),
+        'use_pose': opt_only is not None and all(x in opt_only for x in ['rot', 't']),
+        'rot_out_dim': getattr(args, "rot_out_dim", 4),
+        't_out_dim': t_out_dim,
         'overflow_boxes': args.overflow_boxes}
 
     tracking_kwargs = {
@@ -109,6 +111,7 @@ def build_criterion(args, num_classes, matcher, device):
                    'loss_bbox': args.bbox_loss_coef,
                    'loss_giou': args.giou_loss_coef,
                    "loss_rot": getattr(args, "rot_loss_coef", 1),
+                   "loss_depth": getattr(args, "depth_loss_coef", 1),
                    "loss_t": getattr(args, "t_loss_coef", 1)}
                    
     losses = [
@@ -148,6 +151,7 @@ def build_criterion(args, num_classes, matcher, device):
         focal_alpha=args.focal_alpha,
         focal_gamma=args.focal_gamma,
         tracking=args.tracking,
+        t_out_dim=args.t_out_dim,
         track_query_false_positive_eos_weight=args.track_query_false_positive_eos_weight,)
     criterion.to(device)
     return criterion
