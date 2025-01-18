@@ -135,6 +135,14 @@ class DETRTrackingBase(nn.Module):
                         box_weights = box_weights[:, 0] ** 2 + box_weights[:, 0] ** 2
                         box_weights = torch.sqrt(box_weights)
 
+                        if box_weights.sum() <= 0:
+                            print(f"WARN: {box_weights.sum()=}")
+                            print(f'{box_weights=}')
+                            print(f'{prev_box_matched=}')
+                            print(f'{prev_boxes_matched=}')
+                            print(f'{prev_target_ind_for_fps=}')
+                            box_weights += 1e-8
+
                         # if box_weights.gt(0.0).any():
                         # if box_weights.gt(0.0).any():
                         random_false_out_idx = not_prev_out_ind.pop(

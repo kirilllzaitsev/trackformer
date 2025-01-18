@@ -265,7 +265,7 @@ class DeformableDETR(DETR):
                 outputs_rots.append(outputs_rot)
                 outputs_ts.append(outputs_t)
                 if self.do_predict_2d_t:
-                    outputs_depth = self.depth_mlp(hs[lvl])
+                    outputs_depth = self.depth_embed(hs[lvl])
                     outputs_depths.append(outputs_depth)
         outputs_class = torch.stack(outputs_classes)
         outputs_coord = torch.stack(outputs_coords)
