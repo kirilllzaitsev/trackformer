@@ -59,7 +59,7 @@ class FrozenBatchNorm2d(torch.nn.Module):
 class BackboneBase(nn.Module):
 
     def __init__(self, backbone: nn.Module, train_backbone: bool,
-                 return_interm_layers: bool):
+                 return_interm_layers: bool, backbone_name=None):
         super().__init__()
         for name, parameter in backbone.named_parameters():
             if (not train_backbone
@@ -71,7 +71,12 @@ class BackboneBase(nn.Module):
             return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
             # return_layers = {"layer2": "0", "layer3": "1", "layer4": "2"}
             self.strides = [4, 8, 16, 32]
-            self.num_channels = [256, 512, 1024, 2048]
+            if backbone_name == "resnet50":
+                self.num_channels = [256, 512, 1024, 2048]
+            elif backbone_name == "resnet18":
+                self.num_channels = [64, 128, 256, 512]
+            else:
+                raise RuntimeError(f"Unsupported backbone {backbone_name}")
         else:
             return_layers = {'layer4': "0"}
             self.strides = [32]
@@ -100,7 +105,7 @@ class Backbone(BackboneBase):
             replace_stride_with_dilation=[False, False, dilation],
             pretrained=is_main_process(), norm_layer=norm_layer)
         super().__init__(backbone, train_backbone,
-                         return_interm_layers)
+                         return_interm_layers, backbone_name=name)
         if dilation:
             self.strides[-1] = self.strides[-1] // 2
 
