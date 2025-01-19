@@ -18,6 +18,7 @@ from trackformer.models.transformer import build_transformer
 
 
 def build_model(args, num_classes=None):
+    # num_classes includes bg
     if num_classes is None:
         if args.dataset == 'coco':
             num_classes = 91
@@ -35,9 +36,11 @@ def build_model(args, num_classes=None):
     matcher = build_matcher(args)
 
     opt_only = getattr(args, "opt_only", None)
+    t_out_dim = getattr(args, "t_out_dim", 3)
     detr_kwargs = {
         'backbone': backbone,
         'num_classes': num_classes - 1 if args.focal_loss else num_classes,
+        # 'num_classes': num_classes - 1,
         'num_queries': args.num_queries,
         'aux_loss': args.aux_loss,
         'use_pose': opt_only is not None and all(x in opt_only for x in ['rot', 't']),

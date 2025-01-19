@@ -157,6 +157,7 @@ class DETR(nn.Module):
                'hs_embed': hs_without_norm[-1]}
 
         forward_pose_heads_res = self.forward_pose_heads(hs, out)
+        # out["pred_boxes"] = torch.cat([forward_pose_heads_res['outputs_t'][-1], outputs_coord[-1][...,2:]], dim=-1)
 
         if self.aux_loss:
             out["aux_outputs"] = self._set_aux_loss(
