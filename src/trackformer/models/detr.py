@@ -456,10 +456,11 @@ class SetCriterion(nn.Module):
         targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
         The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
         """
+        tgt_key = "rot_rel" if self.use_rel_pose else "rot"
         idx = self._get_src_permutation_idx(indices)
         src_rots = outputs["rot"][idx]
         target_rots = torch.cat(
-            [t["rot"][i] for t, (_, i) in zip(targets, indices)], dim=0
+            [t[tgt_key][i] for t, (_, i) in zip(targets, indices)], dim=0
         )
 
         losses = {}
@@ -479,12 +480,18 @@ class SetCriterion(nn.Module):
         losses = {}
         if self.t_out_dim == 2:
             src_depths = outputs["center_depth"][idx]
-            target_depths = torch.cat([t["center_depth"][i] for t, (_, i) in zip(targets, indices)], dim=0)
+            tgt_key_depth="center_depth"
+            if self.use_rel_pose:
+                tgt_key_depth += "_rel"
+            target_depths = torch.cat([t[tgt_key_depth][i] for t, (_, i) in zip(targets, indices)], dim=0)
             loss_depth = F.mse_loss(src_depths, target_depths, reduction="none")
             losses["loss_depth"] = loss_depth.sum() / num_boxes
             tgt_key = "xy"
         else:
             tgt_key = "t"
+
+        if self.use_rel_pose:
+            tgt_key += "_rel"
 
         target_ts = torch.cat([t[tgt_key][i] for t, (_, i) in zip(targets, indices)], dim=0)
         loss_t = F.mse_loss(src_ts, target_ts, reduction="none")
