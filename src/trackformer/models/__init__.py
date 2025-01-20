@@ -35,12 +35,13 @@ def build_model(args, num_classes=None):
     backbone = build_backbone(args)
     matcher = build_matcher(args)
 
+    assert args.focal_loss, "Have to adjust the postprocessing code for CE otherwise"
+
     opt_only = getattr(args, "opt_only", None)
     t_out_dim = getattr(args, "t_out_dim", 3)
     detr_kwargs = {
         'backbone': backbone,
         'num_classes': num_classes - 1 if args.focal_loss else num_classes,
-        # 'num_classes': num_classes - 1,
         'num_queries': args.num_queries,
         'aux_loss': args.aux_loss,
         'use_pose': opt_only is not None and all(x in opt_only for x in ['rot', 't']),
@@ -109,7 +110,7 @@ def build_model(args, num_classes=None):
     return model, criterion, postprocessors
 
 
-def build_criterion(args, num_classes, matcher, device):
+def build_criterion(args, num_classes, matcher, device, use_rel_pose=False):
     weight_dict = {'loss_ce': args.cls_loss_coef,
                    'loss_bbox': args.bbox_loss_coef,
                    'loss_giou': args.giou_loss_coef,
@@ -155,6 +156,7 @@ def build_criterion(args, num_classes, matcher, device):
         focal_gamma=args.focal_gamma,
         tracking=args.tracking,
         t_out_dim=args.t_out_dim,
+        use_rel_pose=use_rel_pose,
         track_query_false_positive_eos_weight=args.track_query_false_positive_eos_weight,)
     criterion.to(device)
     return criterion

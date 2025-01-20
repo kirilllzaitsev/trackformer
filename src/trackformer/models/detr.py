@@ -228,6 +228,7 @@ class SetCriterion(nn.Module):
         tracking,
         track_query_false_positive_eos_weight,
         t_out_dim=3,
+        use_rel_pose=False,
     ):
         """Create the criterion.
         Parameters:
@@ -256,6 +257,11 @@ class SetCriterion(nn.Module):
             track_query_false_positive_eos_weight
         )
         self.t_out_dim = t_out_dim
+        
+        self.use_rel_pose = use_rel_pose
+
+    def __repr__(self):
+        return print_cls(self, extra_str=super().__repr__())
 
     def loss_labels(self, outputs, targets, indices, _, log=True):
         """Classification loss (NLL)
