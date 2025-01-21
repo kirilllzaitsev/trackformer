@@ -39,6 +39,7 @@ def build_model(args, num_classes=None):
 
     opt_only = getattr(args, "opt_only", None)
     t_out_dim = getattr(args, "t_out_dim", 3)
+    dropout = getattr(args, "dropout", 0.0)
     detr_kwargs = {
         'backbone': backbone,
         'num_classes': num_classes - 1 if args.focal_loss else num_classes,
@@ -47,6 +48,7 @@ def build_model(args, num_classes=None):
         'use_pose': opt_only is not None and all(x in opt_only for x in ['rot', 't']),
         'rot_out_dim': getattr(args, "rot_out_dim", 4),
         't_out_dim': t_out_dim,
+        'dropout': dropout,
         'overflow_boxes': args.overflow_boxes}
 
     tracking_kwargs = {

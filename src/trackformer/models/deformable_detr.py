@@ -35,7 +35,7 @@ class DeformableDETR(DETR):
     def __init__(self, backbone, transformer, num_classes, num_queries, num_feature_levels,
                  aux_loss=True, with_box_refine=False, two_stage=False, overflow_boxes=False,
                  multi_frame_attention=False, multi_frame_encoding=False, merge_frame_features=False, use_pose=False,
-                 rot_out_dim=4, t_out_dim=3,):
+                 rot_out_dim=4, t_out_dim=3, dropout=0.0):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -49,7 +49,7 @@ class DeformableDETR(DETR):
             two_stage: two-stage Deformable DETR
         """
         super().__init__(backbone, transformer, num_classes, num_queries, aux_loss, use_pose=use_pose,
-                         rot_out_dim=rot_out_dim, t_out_dim=t_out_dim)
+                         rot_out_dim=rot_out_dim, t_out_dim=t_out_dim, dropout=dropout)
 
         self.merge_frame_features = merge_frame_features
         self.multi_frame_attention = multi_frame_attention
