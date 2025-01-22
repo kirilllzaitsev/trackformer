@@ -4,7 +4,6 @@ DETR model and criterion classes.
 """
 import copy
 
-from pose_tracking.models.cnnlstm import MLP
 import torch
 import torch.nn.functional as F
 from pose_tracking.utils.misc import print_cls
@@ -37,6 +36,7 @@ class DETR(nn.Module):
         rot_out_dim=4,
         t_out_dim=3,
         dropout=0.0,
+        dropout_heads=0.0,
     ):
         """Initializes the model.
         Parameters:
@@ -53,6 +53,8 @@ class DETR(nn.Module):
         self.use_pose = use_pose
         self.rot_out_dim = rot_out_dim
         self.t_out_dim = t_out_dim
+        self.dropout = dropout
+        self.dropout_heads = dropout_heads
 
         self.do_predict_2d_t = t_out_dim == 2
 
@@ -60,19 +62,19 @@ class DETR(nn.Module):
         self.transformer = transformer
         self.overflow_boxes = overflow_boxes
         self.class_embed = nn.Linear(self.hidden_dim, num_classes + 1)
-        self.bbox_embed = MLP(self.hidden_dim, hidden_dim=self.hidden_dim, out_dim=4, num_layers=3, dropout=dropout)
+        self.bbox_embed = MLP(self.hidden_dim, self.hidden_dim, 4, 3)
         self.query_embed = nn.Embedding(num_queries, self.hidden_dim)
 
         if use_pose:
-            self.rot_embed = MLP(self.hidden_dim, hidden_dim=self.hidden_dim, out_dim=rot_out_dim, num_layers=2, dropout=dropout)
-            self.t_embed = MLP(self.hidden_dim, hidden_dim=self.hidden_dim, out_dim=t_out_dim, num_layers=2, dropout=dropout)
+            self.rot_embed = MLP(self.hidden_dim, self.hidden_dim, rot_out_dim, num_layers=2, dropout=dropout_heads)
+            self.t_embed = MLP(self.hidden_dim, self.hidden_dim, t_out_dim, num_layers=2, dropout=dropout_heads)
         if self.do_predict_2d_t:
             self.depth_embed = MLP(
-                in_dim=self.hidden_dim,
-                out_dim=1,
+                input_dim=self.hidden_dim,
+                output_dim=1,
                 hidden_dim=self.hidden_dim,
                 num_layers=2,
-                dropout=dropout,
+                dropout=dropout_heads,
             )
 
         # match interface with deformable DETR
@@ -638,18 +640,19 @@ class PostProcess(nn.Module):
         return results
 
 
-class MLPOrig(nn.Module):
+class MLP(nn.Module):
     """ Very simple multi-layer perceptron (also called FFN)"""
 
-    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers, dropout=0.0):
         super().__init__()
         self.num_layers = num_layers
         h = [hidden_dim] * (num_layers - 1)
         self.layers = nn.ModuleList(
             nn.Linear(n, k)
             for n, k in zip([input_dim] + h, h + [output_dim]))
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def forward(self, x):
         for i, layer in enumerate(self.layers):
-            x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
+            x = F.relu(layer(self.dropout(x))) if i < self.num_layers - 1 else layer(x)
         return x
