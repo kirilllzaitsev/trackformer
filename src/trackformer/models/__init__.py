@@ -41,6 +41,9 @@ def build_model(args, num_classes=None):
     t_out_dim = getattr(args, "t_out_dim", 3)
     dropout = getattr(args, "dropout", 0.0)
     dropout_heads = getattr(args, "dropout_heads", 0.0)
+    use_kpts = getattr(args, "use_kpts", False)
+    use_kpts_as_ref_pt = getattr(args, "use_kpts_as_ref_pt", False)
+    use_kpts_as_img = getattr(args, "use_kpts_as_img", False)
     detr_kwargs = {
         'backbone': backbone,
         'num_classes': num_classes - 1 if args.focal_loss else num_classes,
@@ -51,6 +54,10 @@ def build_model(args, num_classes=None):
         't_out_dim': t_out_dim,
         'dropout': dropout,
         'dropout_heads': dropout_heads,
+        'head_num_layers': getattr(args, "head_num_layers", 2),
+        'use_kpts': use_kpts,
+        'use_kpts_as_ref_pt': use_kpts_as_ref_pt,
+        'use_kpts_as_img': use_kpts_as_img,
         'overflow_boxes': args.overflow_boxes}
 
     tracking_kwargs = {
