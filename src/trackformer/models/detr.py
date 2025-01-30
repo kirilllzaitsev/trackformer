@@ -37,6 +37,10 @@ class DETR(nn.Module):
         t_out_dim=3,
         dropout=0.0,
         dropout_heads=0.0,
+        use_kpts=False,
+        use_kpts_as_ref_pt=False,
+        use_kpts_as_img=False,
+        head_num_layers=2,
     ):
         """Initializes the model.
         Parameters:
@@ -50,11 +54,15 @@ class DETR(nn.Module):
         """
         super().__init__()
 
+        self.use_kpts = use_kpts
+        self.use_kpts_as_ref_pt = use_kpts_as_ref_pt
+        self.use_kpts_as_img = use_kpts_as_img
         self.use_pose = use_pose
         self.rot_out_dim = rot_out_dim
         self.t_out_dim = t_out_dim
         self.dropout = dropout
         self.dropout_heads = dropout_heads
+        self.head_num_layers = head_num_layers
 
         self.do_predict_2d_t = t_out_dim == 2
 
@@ -62,29 +70,38 @@ class DETR(nn.Module):
         self.transformer = transformer
         self.overflow_boxes = overflow_boxes
         self.class_embed = nn.Linear(self.hidden_dim, num_classes + 1)
-        self.bbox_embed = MLP(self.hidden_dim, self.hidden_dim, 4, 3)
+        self.bbox_embed = MLP(self.hidden_dim, self.hidden_dim, output_dim=4, num_layers=head_num_layers, dropout=dropout_heads)
         self.query_embed = nn.Embedding(num_queries, self.hidden_dim)
 
+        if use_kpts:
+            self.extractor = load_extractor(features="superpoint", max_num_keypoints=1024)
+            if use_kpts_as_ref_pt:
+                for p in self.extractor.parameters():
+                    p.requires_grad = False
+
         if use_pose:
-            self.rot_embed = MLP(self.hidden_dim, self.hidden_dim, rot_out_dim, num_layers=2, dropout=dropout_heads)
-            self.t_embed = MLP(self.hidden_dim, self.hidden_dim, t_out_dim, num_layers=2, dropout=dropout_heads)
+            self.rot_embed = MLP(self.hidden_dim, self.hidden_dim, rot_out_dim, num_layers=head_num_layers, dropout=dropout_heads)
+            self.t_embed = MLP(self.hidden_dim, self.hidden_dim, t_out_dim, num_layers=head_num_layers, dropout=dropout_heads)
         if self.do_predict_2d_t:
             self.depth_embed = MLP(
                 input_dim=self.hidden_dim,
                 output_dim=1,
                 hidden_dim=self.hidden_dim,
-                num_layers=2,
+                num_layers=head_num_layers,
                 dropout=dropout_heads,
             )
 
-        # match interface with deformable DETR
-        self.input_proj = nn.Conv2d(backbone.num_channels[-1], self.hidden_dim, kernel_size=1)
-        # self.input_proj = nn.ModuleList([
-        #     nn.Sequential(
-        #         nn.Conv2d(backbone.num_channels[-1], self.hidden_dim, kernel_size=1)
-        #     )])
+        if use_kpts_as_img:
+            self.backbone=None
+        else:
+            # match interface with deformable DETR
+            self.input_proj = nn.Conv2d(backbone.num_channels[-1], self.hidden_dim, kernel_size=1)
+            # self.input_proj = nn.ModuleList([
+            #     nn.Sequential(
+            #         nn.Conv2d(backbone.num_channels[-1], self.hidden_dim, kernel_size=1)
+            #     )])
 
-        self.backbone = backbone
+            self.backbone = backbone
         self.aux_loss = aux_loss
 
     @property
@@ -175,11 +192,12 @@ class DETR(nn.Module):
         if self.use_pose:
             outputs_rot = self.rot_embed(hs)
             outputs_t = self.t_embed(hs)
-            out["rot"] = outputs_rot[-1]
-            out["t"] = outputs_t[-1]
             if self.do_predict_2d_t:
                 outputs_depth = self.depth_embed(hs)
                 out["center_depth"] = outputs_depth[-1]
+                outputs_t[-1] = F.sigmoid(outputs_t[-1])
+            out["rot"] = outputs_rot[-1]
+            out["t"] = outputs_t[-1]
         else:
             outputs_rot = None
             outputs_t = None
@@ -654,5 +672,5 @@ class MLP(nn.Module):
 
     def forward(self, x):
         for i, layer in enumerate(self.layers):
-            x = F.relu(layer(self.dropout(x))) if i < self.num_layers - 1 else layer(x)
+            x = self.dropout(F.relu(layer(x))) if i < self.num_layers - 1 else layer(x)
         return x
