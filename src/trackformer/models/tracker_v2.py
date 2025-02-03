@@ -92,7 +92,7 @@ class Tracker:
             track.pos = track.last_pos[-1]
         self.inactive_tracks += tracks
 
-    def add_tracks(self, pos, scores, hs_embeds, indices, masks=None, attention_maps=None, aux_results=None):
+    def add_tracks(self, pos, scores, hs_embeds, indices, masks=None, attention_maps=None, aux_results=None, rot=None, t=None):
         """Initializes new Track objects and saves them."""
         new_track_ids = []
         for i in range(len(pos)):
@@ -104,6 +104,8 @@ class Tracker:
                 indices[i],
                 None if masks is None else masks[i],
                 None if attention_maps is None else attention_maps[i],
+                rot=rot[i] if rot is not None else None,
+                t=t[i] if t is not None else None,
             ))
             new_track_ids.append(self.track_num + i)
         self.track_num += len(new_track_ids)
@@ -430,6 +432,8 @@ class Tracker:
         new_det_scores = result['scores'][-self.num_object_queries:]
         new_det_boxes = boxes[-self.num_object_queries:]
         new_det_hs_embeds = hs_embeds[-self.num_object_queries:]
+        new_det_rots=result['rot'][-self.num_object_queries:]
+        new_det_ts=result['t'][-self.num_object_queries:]
 
         if 'masks' in result:
             new_det_masks = result['masks'][-self.num_object_queries:]
@@ -442,6 +446,8 @@ class Tracker:
 
         new_det_boxes = new_det_boxes[new_det_keep]
         new_det_scores = new_det_scores[new_det_keep]
+        new_det_rots=new_det_rots[new_det_keep]
+        new_det_ts=new_det_ts[new_det_keep]
         new_det_hs_embeds = new_det_hs_embeds[new_det_keep]
         new_det_indices = new_det_keep.float().nonzero()
 
@@ -459,6 +465,8 @@ class Tracker:
 
         new_det_boxes = new_det_boxes[public_detections_mask]
         new_det_scores = new_det_scores[public_detections_mask]
+        new_det_rots=new_det_rots[public_detections_mask]
+        new_det_ts=new_det_ts[public_detections_mask]
         new_det_hs_embeds = new_det_hs_embeds[public_detections_mask]
         new_det_indices = new_det_indices[public_detections_mask]
         if 'masks' in result:
@@ -476,6 +484,8 @@ class Tracker:
 
         new_det_boxes = new_det_boxes[reid_mask]
         new_det_scores = new_det_scores[reid_mask]
+        new_det_rots=new_det_rots[reid_mask]
+        new_det_ts=new_det_ts[reid_mask]
         new_det_hs_embeds = new_det_hs_embeds[reid_mask]
         new_det_indices = new_det_indices[reid_mask]
         if 'masks' in result:
@@ -497,7 +507,10 @@ class Tracker:
             new_det_indices,
             new_det_masks if 'masks' in result else None,
             new_det_attention_maps if self.generate_attention_maps else None,
-            aux_results)
+            aux_results,
+            rot=new_det_rots,
+            t=new_det_ts
+            )
 
         # NMS
         if self.detection_nms_thresh and self.tracks:
@@ -578,10 +591,16 @@ class Track(object):
     """This class contains all necessary for every individual track."""
 
     def __init__(self, pos, score, track_id, hs_embed, obj_ind,
-                 mask=None, attention_map=None):
+                 mask=None, attention_map=None, rot=None, t=None):
         self.id = track_id
         self.pos = pos
         self.last_pos = deque([pos.clone()])
+        self.last_rot = deque()
+        self.last_t = deque()
+        if rot is not None:
+            self.last_rot.append(rot)
+        if t is not None:
+            self.last_t.append(t)
         self.score = score
         self.ims = deque([])
         self.count_inactive = 0
@@ -591,6 +610,8 @@ class Track(object):
         self.mask = mask
         self.attention_map = attention_map
         self.obj_ind = obj_ind
+        self.rot = rot
+        self.t = t
 
     def has_positive_area(self) -> bool:
         """Checks if the current position of the track has
@@ -601,3 +622,9 @@ class Track(object):
         """Reset last_pos to the current position of the track."""
         self.last_pos.clear()
         self.last_pos.append(self.pos.clone())
+        if self.rot is not None:
+            self.last_rot.clear()
+            self.last_rot.append(self.rot.clone())
+        if self.t is not None:
+            self.last_t.clear()
+            self.last_t.append(self.t.clone())
