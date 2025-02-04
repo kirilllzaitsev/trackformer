@@ -172,7 +172,7 @@ class DeformableTransformer(nn.Module):
                 mask_flatten[:, src_flatten.shape[1] // 2:])
             memory = torch.cat([memory, prev_memory], 1)
         else:
-            memory = self.encoder(src_flatten, spatial_shapes, valid_ratios, lvl_pos_embed_flatten, mask_flatten)
+            memory = self.encoder(src_flatten, spatial_shapes, valid_ratios, lvl_pos_embed_flatten, mask_flatten, kpts=kpts if use_kpts_as_ref_pt else None)
 
         # prepare input for decoder
         bs, _, c = memory.shape
@@ -315,12 +315,16 @@ class DeformableTransformerEncoder(nn.Module):
             ref = torch.stack((ref_x, ref_y), -1)
             reference_points_list.append(ref)
         reference_points = torch.cat(reference_points_list, 1)
+        # reference_points bxNx2
         reference_points = reference_points[:, :, None] * valid_ratios[:, None]
         return reference_points
 
-    def forward(self, src, spatial_shapes, valid_ratios, pos=None, padding_mask=None):
+    def forward(self, src, spatial_shapes, valid_ratios, pos=None, padding_mask=None, kpts=None):
         output = src
-        reference_points = self.get_reference_points(spatial_shapes, valid_ratios, device=src.device)
+        if kpts is None:
+            reference_points = self.get_reference_points(spatial_shapes, valid_ratios, device=src.device)
+        else:
+            reference_points = kpts[:, :, None] * valid_ratios[:, None]
         for _, layer in enumerate(self.layers):
             output = layer(output, pos, reference_points, spatial_shapes, padding_mask)
 
