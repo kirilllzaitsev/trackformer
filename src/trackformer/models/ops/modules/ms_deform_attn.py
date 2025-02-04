@@ -13,11 +13,13 @@ from ..functions import ms_deform_attn_core_pytorch_mot
 
 
 class MSDeformAttn(nn.Module):
-    def __init__(self, d_model=256, n_levels=4, n_heads=8, n_points=4, im2col_step=64):
+    def __init__(self, d_model=256, n_levels=4, n_heads=8, n_points=4, im2col_step=64, do_vis=False):
         super().__init__()
         assert d_model % n_heads == 0
 
         self.im2col_step = im2col_step
+        self.do_vis = do_vis
+        # self.do_vis = True
 
         self.d_model = d_model
         self.n_levels = n_levels
@@ -30,6 +32,10 @@ class MSDeformAttn(nn.Module):
         self.output_proj = nn.Linear(d_model, d_model)
 
         self._reset_parameters()
+
+        if self.do_vis:
+            self.outs={}
+            self.out_counter=0
 
     def _reset_parameters(self):
         constant_(self.sampling_offsets.weight.data, 0.)
@@ -57,6 +63,10 @@ class MSDeformAttn(nn.Module):
 
         :return output                     (N, Length_{query}, C)
         """
+        if not hasattr(self, "do_vis"):
+            self.do_vis=True
+            self.outs={}
+            self.out_counter=0
         N, Len_q, _ = query.shape
         N, Len_in, _ = input_flatten.shape
         assert (input_spatial_shapes[:, 0] * input_spatial_shapes[:, 1]).sum() == Len_in
@@ -83,6 +93,25 @@ class MSDeformAttn(nn.Module):
         else:
             raise ValueError(
                 'Last dim of reference_points must be 2 or 4, but get {} instead.'.format(reference_points.shape[-1]))
+
+        if self.do_vis:
+            point = []
+            attention_weight = []
+
+
+            sampling_locations_vis = sampling_locations.detach().cpu()
+            attention_weights_vis = attention_weights.detach().cpu()
+            bidx=0
+            point=(sampling_locations_vis[bidx,:,:,:,:,:])
+            attention_weight=(attention_weights_vis[bidx,:,:,:,:])
+            # image = input_flatten[bidx, 0:input_spatial_shapes[0,0]*input_spatial_shapes[0,1], 0]
+            # image = image.view(input_spatial_shapes[0,0], input_spatial_shapes[0,1])
+            self.outs.update({self.out_counter: {'point': point, 'attention_weight': attention_weight,
+                                                 'input_flatten': input_flatten.detach().cpu(),
+                                                 'input_spatial_shapes': input_spatial_shapes.detach().cpu()}})
+            self.out_counter+=1
+            print(f"{self.out_counter=}")
+                
         output = MSDeformAttnFunction.apply(
             value, input_spatial_shapes, sampling_locations, attention_weights, self.im2col_step)
         output = self.output_proj(output)
