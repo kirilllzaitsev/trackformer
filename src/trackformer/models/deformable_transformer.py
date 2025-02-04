@@ -9,6 +9,8 @@
 
 import math
 
+from pose_tracking.models.cnnlstm import MLP
+from pose_tracking.models.pos_encoding import SpatialPosEncoding
 import torch
 from torch import nn
 from torch.nn.init import constant_, normal_, xavier_uniform_
@@ -24,7 +26,7 @@ class DeformableTransformer(nn.Module):
                  dropout=0.1, activation="relu", return_intermediate_dec=False,
                  num_feature_levels=4, dec_n_points=4,  enc_n_points=4,
                  two_stage=False, two_stage_num_proposals=300,
-                 multi_frame_attention_separate_encoder=False):
+                 multi_frame_attention_separate_encoder=False, use_kpts=False, use_kpts_as_ref_pt=False, use_kpts_as_img=False):
         super().__init__()
 
         self.d_model = d_model
@@ -33,6 +35,14 @@ class DeformableTransformer(nn.Module):
         self.two_stage_num_proposals = two_stage_num_proposals
         self.num_feature_levels = num_feature_levels
         self.multi_frame_attention_separate_encoder = multi_frame_attention_separate_encoder
+        self.use_kpts = use_kpts
+        self.use_kpts_as_ref_pt = use_kpts_as_ref_pt
+        self.use_kpts_as_img = use_kpts_as_img
+
+        if use_kpts_as_img:
+            self.descriptor_proj = MLP(in_dim=256, out_dim=d_model, hidden_dim=256, num_layers=2)
+            self.kpt_spatial_dim = 2
+            self.kpt_pos_embed = SpatialPosEncoding(self.d_model, ndim=self.kpt_spatial_dim)
 
         enc_num_feature_levels = num_feature_levels
         if multi_frame_attention_separate_encoder:
@@ -48,6 +58,9 @@ class DeformableTransformer(nn.Module):
         self.decoder = DeformableTransformerDecoder(decoder_layer, num_decoder_layers, return_intermediate_dec)
 
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model))
+        
+        if use_kpts_as_img:
+            self.level_embed.requires_grad = False
 
         if two_stage:
             self.enc_output = nn.Linear(d_model, d_model)
@@ -130,31 +143,73 @@ class DeformableTransformer(nn.Module):
         valid_ratio = torch.stack([valid_ratio_w, valid_ratio_h], -1)
         return valid_ratio
 
-    def forward(self, srcs, masks, pos_embeds, query_embed=None, targets=None):
+    def forward(self, srcs, masks, pos_embeds, query_embed=None, targets=None, kpt_extractor_res=None, use_kpts_as_ref_pt=False, use_kpts_as_img=False):
         assert self.two_stage or query_embed is not None
 
-        # prepare input for encoder
-        src_flatten = []
-        mask_flatten = []
-        lvl_pos_embed_flatten = []
-        spatial_shapes = []
-        for lvl, (src, mask, pos_embed) in enumerate(zip(srcs, masks, pos_embeds)):
-            bs, c, h, w = src.shape
-            spatial_shape = (h, w)
-            spatial_shapes.append(spatial_shape)
-            src = src.flatten(2).transpose(1, 2)
-            mask = mask.flatten(1)
-            pos_embed = pos_embed.flatten(2).transpose(1, 2)
-            lvl_pos_embed = pos_embed + self.level_embed[lvl].view(1, 1, -1)
-            # lvl_pos_embed = pos_embed + self.level_embed[lvl % self.num_feature_levels].view(1, 1, -1)
-            lvl_pos_embed_flatten.append(lvl_pos_embed)
-            src_flatten.append(src)
-            mask_flatten.append(mask)
-        src_flatten = torch.cat(src_flatten, 1)
-        mask_flatten = torch.cat(mask_flatten, 1)
-        lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)
+        if not self.use_kpts or use_kpts_as_ref_pt:
+            # prepare input for encoder
+            src_flatten = []
+            mask_flatten = []
+            lvl_pos_embed_flatten = []
+            spatial_shapes = []
+            for lvl, (src, mask, pos_embed) in enumerate(zip(srcs, masks, pos_embeds)):
+                bs, c, h, w = src.shape
+                spatial_shape = (h, w)
+                spatial_shapes.append(spatial_shape)
+                src = src.flatten(2).transpose(1, 2)
+                mask = mask.flatten(1)
+                pos_embed = pos_embed.flatten(2).transpose(1, 2)
+                lvl_pos_embed = pos_embed + self.level_embed[lvl].view(1, 1, -1)
+                # lvl_pos_embed = pos_embed + self.level_embed[lvl % self.num_feature_levels].view(1, 1, -1)
+                lvl_pos_embed_flatten.append(lvl_pos_embed)
+                src_flatten.append(src)
+                mask_flatten.append(mask)
+            src_flatten = torch.cat(src_flatten, 1)
+            mask_flatten = torch.cat(mask_flatten, 1)
+            lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)
+
+        if use_kpts_as_img or use_kpts_as_ref_pt:
+            assert kpt_extractor_res is not None
+            # upsample bxnx2 kpts to bxsrc_flatten.shape[1]x2 by duplicating random kpts
+            kpts = kpt_extractor_res['keypoints']
+
+            # TODO: padded kpts are not masked whens used as refs
+
+            # rand_kpt_idxs = torch.randint(kpts.shape[1], (src_flatten.shape[1],))
+            num_kpts = kpts.shape[1]
+            while num_kpts > 0 and (num_kpts % 2 != 0 or num_kpts // 2 % 2 != 0):
+                num_kpts -= 1
+            assert num_kpts > 0
+            rand_kpt_idxs = torch.arange(num_kpts if kpts.shape[1] % 2 == 0 else kpts.shape[1] - 1)
+            kpts = kpts[:, rand_kpt_idxs]
+            
+            if use_kpts_as_img:
+                descriptors = kpt_extractor_res['descriptors']
+                kpt_padding_mask = kpt_extractor_res['padding_mask']
+                descriptors = self.descriptor_proj(descriptors)
+                kpt_pos_embed = self.kpt_pos_embed(kpts)
+                descriptors = descriptors[:, rand_kpt_idxs]
+                if kpt_padding_mask is None:
+                    kpt_padding_mask = torch.zeros_like(kpts[..., 0], dtype=torch.bool)
+                kpt_padding_mask = kpt_padding_mask[:, rand_kpt_idxs]
+                kpt_pos_embed = kpt_pos_embed[:, rand_kpt_idxs]
+
+                src_flatten = descriptors
+                mask_flatten = kpt_padding_mask
+                lvl_pos_embed_flatten = kpt_pos_embed
+                # spatial_shapes is an arr with kpts.shape[1] // 2 duplicated twice
+                a=[torch.tensor([kpts.shape[1] // 4], device=src_flatten.device)]
+                spatial_shapes=(torch.hstack([torch.ones(1).cuda(), torch.as_tensor(a, dtype=torch.long, device=src_flatten.device)]).repeat(self.num_feature_levels,1))
+                # TODO: no level info for kpts
+            # TODO: find a way to add mask to kpts when used as ref pts
+            # instead of adding zeros, duplicate some kpts?! although it adds some bias.
+        else:
+            kpts = None
+
         spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src_flatten.device)
         valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
+        if use_kpts_as_img:
+            valid_ratios=torch.ones_like(spatial_shapes).unsqueeze(0).repeat(src_flatten.shape[0],1,1)
 
         # encoder
         if self.multi_frame_attention_separate_encoder:
@@ -163,13 +218,15 @@ class DeformableTransformer(nn.Module):
                 spatial_shapes[:self.num_feature_levels // 2],
                 valid_ratios[:, :self.num_feature_levels // 2],
                 lvl_pos_embed_flatten[:, :src_flatten.shape[1] // 2],
-                mask_flatten[:, :src_flatten.shape[1] // 2])
+                mask_flatten[:, :src_flatten.shape[1] // 2],
+                kpts=kpts[:, :src_flatten.shape[1] // 2] if use_kpts_as_ref_pt else None)
             memory = self.encoder(
                 src_flatten[:, src_flatten.shape[1] // 2:],
                 spatial_shapes[self.num_feature_levels // 2:],
                 valid_ratios[:, self.num_feature_levels // 2:],
                 lvl_pos_embed_flatten[:, src_flatten.shape[1] // 2:],
-                mask_flatten[:, src_flatten.shape[1] // 2:])
+                mask_flatten[:, src_flatten.shape[1] // 2:],
+                kpts=kpts[:, :src_flatten.shape[1] // 2] if use_kpts_as_ref_pt else None)
             memory = torch.cat([memory, prev_memory], 1)
         else:
             memory = self.encoder(src_flatten, spatial_shapes, valid_ratios, lvl_pos_embed_flatten, mask_flatten, kpts=kpts if use_kpts_as_ref_pt else None)
@@ -455,4 +512,7 @@ def build_deforamble_transformer(args):
         enc_n_points=args.enc_n_points,
         two_stage=args.two_stage,
         two_stage_num_proposals=args.num_queries,
+        use_kpts=getattr(args, "use_kpts", False),
+        use_kpts_as_ref_pt=getattr(args, "use_kpts_as_ref_pt", False),
+        use_kpts_as_img=getattr(args, "use_kpts_as_img", False),
         multi_frame_attention_separate_encoder=args.multi_frame_attention and args.multi_frame_attention_separate_encoder)
