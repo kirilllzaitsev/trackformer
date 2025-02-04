@@ -262,11 +262,12 @@ class DeformableDETR(DETR):
             if self.use_pose:
                 outputs_rot = self.rot_embed[lvl](hs[lvl])
                 outputs_t = self.t_embed[lvl](hs[lvl])
-                outputs_rots.append(outputs_rot)
-                outputs_ts.append(outputs_t)
                 if self.do_predict_2d_t:
                     outputs_depth = self.depth_embed(hs[lvl])
                     outputs_depths.append(outputs_depth)
+                    outputs_t = F.sigmoid(outputs_t)
+                outputs_rots.append(outputs_rot)
+                outputs_ts.append(outputs_t)
         outputs_class = torch.stack(outputs_classes)
         outputs_coord = torch.stack(outputs_coords)
 

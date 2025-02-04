@@ -4,6 +4,7 @@ DETR model and criterion classes.
 """
 import copy
 
+from pose_tracking.utils.kpt_utils import load_extractor
 import torch
 import torch.nn.functional as F
 from pose_tracking.utils.misc import print_cls
