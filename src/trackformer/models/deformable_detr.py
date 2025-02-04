@@ -299,12 +299,23 @@ class DeformableDETR(DETR):
         offset = 0
         memory_slices = []
         batch_size, _, channels = memory.shape
-        for src in src_list:
-            _, _, height, width = src.shape
+        if self.use_kpts_as_img:
+            kpts= kpt_extractor_res['keypoints']
+            num_kpts = kpts.shape[1]
+            while num_kpts > 0 and (num_kpts % 2 != 0 or num_kpts // 2 % 2 != 0):
+                num_kpts -= 1
+            height=1
+            width=num_kpts
             memory_slice = memory[:, offset:offset + height * width].permute(0, 2, 1).view(
                 batch_size, channels, height, width)
             memory_slices.append(memory_slice)
-            offset += height * width
+        else:
+            for src in src_list:
+                _, _, height, width = src.shape
+                memory_slice = memory[:, offset:offset + height * width].permute(0, 2, 1).view(
+                    batch_size, channels, height, width)
+                memory_slices.append(memory_slice)
+                offset += height * width
 
         memory = memory_slices
         # memory = memory_slices[-1]
