@@ -232,11 +232,22 @@ class DeformableDETR(DETR):
                     else:
                         pos_list.append(pos_l)
 
+        if self.use_kpts:
+            kpt_extractor_res = extract_kpts(samples.tensors, extractor=self.extractor, do_normalize=True, use_zeros_for_pad=self.use_kpts_as_img and not self.use_kpts_as_ref_pt)
+            self.kpt_extractor_res_prev = kpt_extractor_res
+            # merge kpt_extractor_res with kpt_extractor_res_prev
+            kpt_extractor_res_prev = kpt_extractor_res if kpt_extractor_res_prev is None else kpt_extractor_res_prev
+            if kpt_extractor_res_prev is not None:
+                kpt_extractor_res = {k: torch.cat([kpt_extractor_res[k], kpt_extractor_res_prev[k]], dim=1) if kpt_extractor_res[k] is not None else None for k in kpt_extractor_res}
+        else:
+            kpt_extractor_res=None
+
         query_embeds = None
         if not self.two_stage:
             query_embeds = self.query_embed.weight
         hs, memory, init_reference, inter_references, enc_outputs_class, enc_outputs_coord_unact = \
-            self.transformer(src_list, mask_list, pos_list, query_embeds, targets)
+            self.transformer(src_list, mask_list, pos_list, query_embeds, targets, kpt_extractor_res=kpt_extractor_res,
+                             use_kpts_as_ref_pt=self.use_kpts_as_ref_pt, use_kpts_as_img=self.use_kpts_as_img)
 
         outputs_classes = []
         outputs_coords = []
