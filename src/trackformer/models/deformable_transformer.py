@@ -175,15 +175,14 @@ class DeformableTransformer(nn.Module):
 
             # TODO: padded kpts are not masked whens used as refs
 
-            # rand_kpt_idxs = torch.randint(kpts.shape[1], (src_flatten.shape[1],))
             num_kpts = kpts.shape[1]
-            while num_kpts > 0 and (num_kpts % 2 != 0 or num_kpts // 2 % 2 != 0):
-                num_kpts -= 1
-            assert num_kpts > 0
-            rand_kpt_idxs = torch.arange(num_kpts if kpts.shape[1] % 2 == 0 else kpts.shape[1] - 1)
-            kpts = kpts[:, rand_kpt_idxs]
             
             if use_kpts_as_img:
+                while num_kpts > 0 and (num_kpts % 2 != 0 or num_kpts // 2 % 2 != 0):
+                    num_kpts -= 1
+                assert num_kpts > 0
+                rand_kpt_idxs = torch.arange(num_kpts if kpts.shape[1] % 2 == 0 else kpts.shape[1] - 1)
+                kpts = kpts[:, rand_kpt_idxs]
                 descriptors = kpt_extractor_res['descriptors']
                 kpt_padding_mask = kpt_extractor_res['padding_mask']
                 descriptors = self.descriptor_proj(descriptors)
@@ -201,6 +200,10 @@ class DeformableTransformer(nn.Module):
                 a=[torch.tensor([kpts.shape[1] // 4], device=src_flatten.device)]
                 spatial_shapes=(torch.hstack([torch.ones(1).cuda(), torch.as_tensor(a, dtype=torch.long, device=src_flatten.device)]).repeat(self.num_feature_levels,1))
                 # TODO: no level info for kpts
+            else:
+                rand_kpt_idxs = torch.randint(num_kpts, (src_flatten.shape[1],))
+                kpts = kpts[:, rand_kpt_idxs]
+
             # TODO: find a way to add mask to kpts when used as ref pts
             # instead of adding zeros, duplicate some kpts?! although it adds some bias.
         else:
