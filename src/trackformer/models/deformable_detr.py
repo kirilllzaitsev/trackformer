@@ -35,7 +35,7 @@ class DeformableDETR(DETR):
     """ This is the Deformable DETR module that performs object detection """
     def __init__(self, backbone, transformer, num_classes, num_queries, num_feature_levels,
                  aux_loss=True, with_box_refine=False, two_stage=False, overflow_boxes=False,
-                 multi_frame_attention=False, multi_frame_encoding=False, merge_frame_features=False, use_pose=False,
+                 multi_frame_attention=False, multi_frame_encoding=False, merge_frame_features=False, use_pose=False, use_depth=False,
                  rot_out_dim=4, t_out_dim=3, dropout=0.0, dropout_heads=0.0, use_kpts=False, use_kpts_as_ref_pt=False, use_kpts_as_img=False,
                  head_num_layers=2):
         """ Initializes the model.
@@ -50,7 +50,7 @@ class DeformableDETR(DETR):
             with_box_refine: iterative bounding box refinement
             two_stage: two-stage Deformable DETR
         """
-        super().__init__(backbone, transformer, num_classes, num_queries, aux_loss, use_pose=use_pose,
+        super().__init__(backbone, transformer, num_classes, num_queries, aux_loss, use_pose=use_pose, use_depth=use_depth,
                          rot_out_dim=rot_out_dim, t_out_dim=t_out_dim, dropout=dropout, dropout_heads=dropout_heads,
                          use_kpts=use_kpts, use_kpts_as_ref_pt=use_kpts_as_ref_pt, use_kpts_as_img=use_kpts_as_img,
                          head_num_layers=head_num_layers)

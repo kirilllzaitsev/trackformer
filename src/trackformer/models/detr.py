@@ -38,6 +38,7 @@ class DETR(nn.Module):
         t_out_dim=3,
         dropout=0.0,
         dropout_heads=0.0,
+        use_depth=False,
         use_kpts=False,
         use_kpts_as_ref_pt=False,
         use_kpts_as_img=False,
@@ -55,6 +56,7 @@ class DETR(nn.Module):
         """
         super().__init__()
 
+        self.use_depth = use_depth
         self.use_kpts = use_kpts
         self.use_kpts_as_ref_pt = use_kpts_as_ref_pt
         self.use_kpts_as_img = use_kpts_as_img
@@ -415,7 +417,7 @@ class SetCriterion(nn.Module):
         src_boxes = outputs['pred_boxes'][idx]
         target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
 
-        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
+        loss_bbox = F.mse_loss(src_boxes, target_boxes, reduction='none')
 
         losses = {}
         losses['loss_bbox'] = loss_bbox.sum() / num_boxes
