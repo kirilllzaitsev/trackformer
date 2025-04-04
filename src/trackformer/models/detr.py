@@ -34,6 +34,7 @@ class DETR(nn.Module):
         aux_loss=False,
         overflow_boxes=False,
         use_pose=False,
+        use_boxes=True,
         rot_out_dim=4,
         t_out_dim=3,
         dropout=0.0,
@@ -43,6 +44,8 @@ class DETR(nn.Module):
         use_kpts_as_ref_pt=False,
         use_kpts_as_img=False,
         head_num_layers=2,
+        head_hidden_dim=None,
+        r_num_layers_inc=0
     ):
         """Initializes the model.
         Parameters:
@@ -57,6 +60,7 @@ class DETR(nn.Module):
         super().__init__()
 
         self.use_depth = use_depth
+        self.use_boxes = use_boxes
         self.use_kpts = use_kpts
         self.use_kpts_as_ref_pt = use_kpts_as_ref_pt
         self.use_kpts_as_img = use_kpts_as_img
@@ -68,13 +72,17 @@ class DETR(nn.Module):
         self.head_num_layers = head_num_layers
 
         self.do_predict_2d_t = t_out_dim == 2
+        self.head_hidden_dim = head_hidden_dim or transformer.d_model
 
         self.num_queries = num_queries
         self.transformer = transformer
         self.overflow_boxes = overflow_boxes
         self.class_embed = nn.Linear(self.hidden_dim, num_classes + 1)
-        self.bbox_embed = MLP(self.hidden_dim, self.hidden_dim, output_dim=4, num_layers=head_num_layers, dropout=dropout_heads)
         self.query_embed = nn.Embedding(num_queries, self.hidden_dim)
+        self.bbox_embed = MLP(self.hidden_dim, self.hidden_dim, output_dim=4, num_layers=head_num_layers, dropout=dropout_heads)
+        if not use_boxes:
+            for p in self.bbox_embed.parameters():
+                p.requires_grad = False
 
         if use_kpts:
             self.extractor = load_extractor(features="superpoint", max_num_keypoints=1024)
@@ -83,13 +91,13 @@ class DETR(nn.Module):
                     p.requires_grad = False
 
         if use_pose:
-            self.rot_embed = MLP(self.hidden_dim, self.hidden_dim, rot_out_dim, num_layers=head_num_layers, dropout=dropout_heads)
-            self.t_embed = MLP(self.hidden_dim, self.hidden_dim, t_out_dim, num_layers=head_num_layers, dropout=dropout_heads)
+            self.rot_embed = MLP(self.hidden_dim, self.head_hidden_dim, rot_out_dim, num_layers=head_num_layers+r_num_layers_inc, dropout=dropout_heads)
+            self.t_embed = MLP(self.hidden_dim, self.head_hidden_dim, t_out_dim, num_layers=head_num_layers, dropout=dropout_heads)
         if self.do_predict_2d_t:
             self.depth_embed = MLP(
                 input_dim=self.hidden_dim,
                 output_dim=1,
-                hidden_dim=self.hidden_dim,
+                hidden_dim=self.head_hidden_dim,
                 num_layers=head_num_layers,
                 dropout=dropout_heads,
             )
@@ -180,17 +188,6 @@ class DETR(nn.Module):
                'pred_boxes': outputs_coord[-1],
                'hs_embed': hs_without_norm[-1]}
 
-        forward_pose_heads_res = self.forward_pose_heads(hs, out)
-        # out["pred_boxes"] = torch.cat([forward_pose_heads_res['outputs_t'][-1], outputs_coord[-1][...,2:]], dim=-1)
-
-        if self.aux_loss:
-            out["aux_outputs"] = self._set_aux_loss(
-                outputs_class, outputs_coord, **forward_pose_heads_res,
-            )
-
-        return out, targets, features, memory, hs
-
-    def forward_pose_heads(self, hs, out):
         outputs_depth = None
         if self.use_pose:
             outputs_rot = self.rot_embed(hs)
@@ -204,11 +201,18 @@ class DETR(nn.Module):
         else:
             outputs_rot = None
             outputs_t = None
-        return {
+        forward_pose_heads_res = {
             "outputs_rot": outputs_rot,
             "outputs_t": outputs_t,
             "outputs_depth": outputs_depth,
         }
+
+        if self.aux_loss:
+            out["aux_outputs"] = self._set_aux_loss(
+                outputs_class, outputs_coord, **forward_pose_heads_res,
+            )
+
+        return out, targets, features, memory, hs
 
     @torch.jit.unused
     def _set_aux_loss(

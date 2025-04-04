@@ -36,7 +36,7 @@ class HungarianMatcher(nn.Module):
         self.focal_loss = focal_loss
         self.focal_alpha = focal_alpha
         self.focal_gamma = focal_gamma
-        assert cost_class != 0 or cost_bbox != 0 or cost_giou != 0, "all costs cant be 0"
+        # assert cost_class != 0 or cost_bbox != 0 or cost_giou != 0, "all costs cant be 0"
 
     @torch.no_grad()
     def forward(self, outputs, targets):
@@ -80,7 +80,8 @@ class HungarianMatcher(nn.Module):
         if self.focal_loss:
             neg_cost_class = (1 - self.focal_alpha) * (out_prob ** self.focal_gamma) * (-(1 - out_prob + 1e-8).log())
             pos_cost_class = self.focal_alpha * ((1 - out_prob) ** self.focal_gamma) * (-(out_prob + 1e-8).log())
-            cost_class = pos_cost_class[:, tgt_ids] - neg_cost_class[:, tgt_ids]
+            cost_class = pos_cost_class.cpu()[:, tgt_ids.cpu()] - neg_cost_class.cpu()[:, tgt_ids.cpu()]
+            cost_class = cost_class.to(out_prob.device)
         else:
             # Contrary to the loss, we don't use the NLL, but approximate it in 1 - proba[target class].
             # The 1 is a constant that doesn't change the matching, it can be ommitted.
@@ -102,9 +103,16 @@ class HungarianMatcher(nn.Module):
             cost_giou = 0
 
         # Final cost matrix
-        cost_matrix = self.cost_bbox * cost_bbox \
+        try:
+            cost_matrix = self.cost_bbox * cost_bbox \
             + self.cost_class * cost_class \
             + self.cost_giou * cost_giou
+        except Exception as e:
+            print(f"{cost_bbox.shape=} {cost_class.shape=} {cost_giou.shape=}")
+            print(f"{cost_bbox=}\n {cost_class=}\n {cost_giou=}\n")
+            print(f"{outputs=}\n")
+            print(f"{targets=}\n")
+            raise ValueError(f"Error in cost matrix calculation\n{e}")
         cost_matrix = cost_matrix.view(batch_size, num_queries, -1).cpu()
 
         sizes = [len(v["boxes"]) for v in targets]
