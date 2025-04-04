@@ -480,6 +480,24 @@ class SetCriterion(nn.Module):
         }
         return losses
 
+    def loss_factors(self, outputs, targets, indices, num_boxes):
+        """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
+        targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+        The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
+        """
+        idx = self._get_src_permutation_idx(indices)
+        losses = {}
+        for f in self.factors:
+            src_rots = outputs["factors"][f].cpu()[idx].cuda()
+            target_rots = torch.cat(
+                [t['factors'][f][i] for t, (_, i) in zip(targets, indices)], dim=0
+            ).unsqueeze(-1).float()
+            loss_f = F.binary_cross_entropy(src_rots, target_rots, reduction="none")
+            losses[f"loss_factors_{f}"] = loss_f
+
+        losses = {k: v.sum() / num_boxes for k, v in losses.items()}
+        return losses
+
     def loss_rot(self, outputs, targets, indices, num_boxes):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
         targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
@@ -550,6 +568,10 @@ class SetCriterion(nn.Module):
             'rot': self.loss_rot,
             't': self.loss_t,
         }
+        if self.use_factors:
+            loss_map.update({
+                'factors': self.loss_factors,
+            })
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
         return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
 

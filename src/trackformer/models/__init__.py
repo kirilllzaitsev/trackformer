@@ -44,6 +44,8 @@ def build_model(args, num_classes=None):
     use_kpts = getattr(args, "use_kpts", False)
     use_kpts_as_ref_pt = getattr(args, "use_kpts_as_ref_pt", False)
     use_kpts_as_img = getattr(args, "use_kpts_as_img", False)
+    r_num_layers_inc = getattr(args, "r_num_layers_inc", 0)
+    use_boxes = opt_only is not None and all(x in opt_only for x in ['boxes'])
     detr_kwargs = {
         'backbone': backbone,
         'num_classes': num_classes - 1 if args.focal_loss else num_classes,
@@ -55,9 +57,12 @@ def build_model(args, num_classes=None):
         'dropout': dropout,
         'dropout_heads': dropout_heads,
         'head_num_layers': getattr(args, "head_num_layers", 2),
+        'head_hidden_dim': getattr(args, "head_hidden_dim", None),
+        'use_boxes': use_boxes,
         'use_kpts': use_kpts,
         'use_kpts_as_ref_pt': use_kpts_as_ref_pt,
         'use_kpts_as_img': use_kpts_as_img,
+        'r_num_layers_inc': r_num_layers_inc,
         'overflow_boxes': args.overflow_boxes}
 
     tracking_kwargs = {
@@ -125,6 +130,9 @@ def build_criterion(args, num_classes, matcher, device, use_rel_pose=False):
     weight_dict = {'loss_ce': args.cls_loss_coef,
                    'loss_bbox': args.bbox_loss_coef,
                    'loss_giou': args.giou_loss_coef,
+                   'loss_factors_scale': 1,
+                   'loss_factors_occlusion': 1,
+                   'loss_factors_texture': 1,
                    "loss_rot": getattr(args, "rot_loss_coef", 1),
                    "loss_depth": getattr(args, "depth_loss_coef", 1),
                    "loss_t": getattr(args, "t_loss_coef", 1)}
@@ -168,6 +176,8 @@ def build_criterion(args, num_classes, matcher, device, use_rel_pose=False):
         tracking=args.tracking,
         t_out_dim=args.t_out_dim,
         use_rel_pose=use_rel_pose,
-        track_query_false_positive_eos_weight=args.track_query_false_positive_eos_weight,)
+        track_query_false_positive_eos_weight=args.track_query_false_positive_eos_weight,
+        factors=args.factors,
+    )
     criterion.to(device)
     return criterion
