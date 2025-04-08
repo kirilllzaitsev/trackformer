@@ -650,8 +650,9 @@ class SetCriterion(nn.Module):
         if self.use_factors:
             indices = self.filter_out_idxs_for_rel_pose(targets, indices)
             idx = self._get_src_permutation_idx(indices)
-            uncertainty = outputs["uncertainty"][idx]
-            losses["uncertainty"] = uncertainty
+            log_var = outputs["uncertainty"][idx]
+            var = torch.exp(log_var)
+            losses["uncertainty"] = var
         for loss in self.losses:
             loss_value = self.get_loss(loss, outputs, targets, indices, num_boxes)
 
@@ -659,8 +660,7 @@ class SetCriterion(nn.Module):
                 loss_key = "loss_" + loss
                 loss_scalar = loss_value[loss_key]
                 loss_value[loss_key] = (
-                    loss_scalar / (2 * uncertainty**2 + 1e-6)
-                    + torch.log(uncertainty**2) / 2
+                   log_var + loss_scalar / var - 1 + 0.5 * torch.abs(var)
                 )
             losses.update(loss_value)
         losses['indices'] = indices
