@@ -4,11 +4,12 @@ DETR model and criterion classes.
 """
 import copy
 
-from pose_tracking.utils.kpt_utils import load_extractor
 import torch
 import torch.nn.functional as F
-from pose_tracking.utils.misc import print_cls
+from pose_tracking.utils.kpt_utils import load_extractor
+from pose_tracking.utils.misc import init_params, print_cls
 from torch import nn
+
 from trackformer.util import box_ops
 from trackformer.util.misc import (
     NestedTensor,
@@ -101,6 +102,11 @@ class DETR(nn.Module):
                 num_layers=head_num_layers,
                 dropout=dropout_heads,
             )
+            # use bbox 2d for t
+            for p in self.t_embed.parameters():
+                p.requires_grad = False
+
+        init_params(self, included_names=['rot_embed', 't_embed', 'depth_embed'])
 
         if use_kpts_as_img:
             self.backbone=None

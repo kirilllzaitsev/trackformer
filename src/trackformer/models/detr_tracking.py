@@ -268,7 +268,13 @@ class DETRTrackingBase(nn.Module):
 
                     prev_outputs_without_aux = {
                         k: v for k, v in prev_out.items() if 'aux_outputs' not in k}
-                    prev_indices = self._matcher(prev_outputs_without_aux, prev_targets)
+                    try:
+                        prev_indices = self._matcher(prev_outputs_without_aux, prev_targets)
+                    except Exception as e:
+                        print(f"{targets=}")
+                        print(f"{prev_targets=}")
+                        print(f"{prev_outputs_without_aux=}")
+                        raise e
                     prev_indices = cast_to_torch(prev_indices, device=prev_out['pred_boxes'].device)
 
                     self.add_track_queries_to_targets(
