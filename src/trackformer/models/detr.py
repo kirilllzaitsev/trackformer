@@ -647,8 +647,22 @@ class SetCriterion(nn.Module):
 
         # Compute all the requested losses
         losses = {}
+        if self.use_factors:
+            indices = self.filter_out_idxs_for_rel_pose(targets, indices)
+            idx = self._get_src_permutation_idx(indices)
+            uncertainty = outputs["uncertainty"][idx]
+            losses["uncertainty"] = uncertainty
         for loss in self.losses:
-            losses.update(self.get_loss(loss, outputs, targets, indices, num_boxes))
+            loss_value = self.get_loss(loss, outputs, targets, indices, num_boxes)
+
+            if self.use_factors and loss in ["rot", "t"]:
+                loss_key = "loss_" + loss
+                loss_scalar = loss_value[loss_key]
+                loss_value[loss_key] = (
+                    loss_scalar / (2 * uncertainty**2 + 1e-6)
+                    + torch.log(uncertainty**2) / 2
+                )
+            losses.update(loss_value)
         losses['indices'] = indices
 
         # In case of auxiliary losses, we repeat this process with the
