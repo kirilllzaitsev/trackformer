@@ -258,6 +258,8 @@ class SetCriterion(nn.Module):
         track_query_false_positive_eos_weight,
         t_out_dim=3,
         use_rel_pose=False,
+        use_pose_refinement=False,
+        factors=None,
     ):
         """Create the criterion.
         Parameters:
@@ -286,8 +288,23 @@ class SetCriterion(nn.Module):
             track_query_false_positive_eos_weight
         )
         self.t_out_dim = t_out_dim
+        self.factors=factors
         
         self.use_rel_pose = use_rel_pose
+        self.use_pose_refinement = use_pose_refinement
+
+        self.use_factors = factors is not None
+        self.device='cuda'
+        self.mean_delta_t, self.mean_delta_rot = (
+                    torch.tensor([0.0287253, 0.0011501, 0.0197429], device=self.device),
+                    torch.tensor(
+                        [0.01121484, 0.00856275, 0.00846249, 0.00392139, 0.00301261, 0.00935597], device=self.device
+                    ),
+                )
+        self.mean_delta_t, self.mean_delta_rot = 1,1
+
+        if self.use_factors:
+            self.losses.append("factors")
 
     def __repr__(self):
         return print_cls(self, extra_str=super().__repr__())
@@ -503,25 +520,45 @@ class SetCriterion(nn.Module):
         targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
         The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
         """
-        tgt_key = "rot_rel" if self.use_rel_pose else "rot"
-        idx = self._get_src_permutation_idx(indices)
-        src_rots = outputs["rot"][idx]
-        target_rots = torch.cat(
-            [t[tgt_key][i] for t, (_, i) in zip(targets, indices)], dim=0
-        )
+        indices = self.filter_out_idxs_for_rel_pose(targets, indices)
 
+        idx = self._get_src_permutation_idx(indices)
+
+        src_rots = outputs["rot"][idx]
+        tgt_key = "rot_rel" if self.use_rel_pose else "rot"
+        target_rots = (
+            [t[tgt_key][i] for t, (_, i) in zip(targets, indices) if len(t[tgt_key])>0]
+        )
+        # if self.use_rel_pose:
+        #     target_rots = [r[valid_target_idxs[i]] for i, r in enumerate(target_rots)]
+        if len(target_rots)==0:
+            return {}
+        target_rots=torch.cat(target_rots, dim=0)
         losses = {}
         loss_rot = F.mse_loss(src_rots, target_rots, reduction="none")
-        losses["loss_rot"] = loss_rot.sum() / num_boxes
+        losses["loss_rot"] = loss_rot
 
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
         return losses
+
+    def filter_out_idxs_for_rel_pose(self, targets, indices):
+        indices = copy.deepcopy(indices)
+        if self.use_rel_pose:
+            # ensure idx[1] contains target idxs of objs present in both frames
+            tgt_prev_visib_idxs = [t['prev_target']['visible_obj_idxs'] for t in targets]
+            tgt_visib_idxs = [t['visible_obj_idxs'] for t in targets]
+            valid_target_idxs = [torch.tensor([i for i in prev_visib_idxs if i in visib_idxs]) for prev_visib_idxs, visib_idxs in zip(tgt_prev_visib_idxs, tgt_visib_idxs)]
+            for bidx, indices_b in enumerate(indices):
+                idx_mask = torch.isin(indices_b[1], valid_target_idxs[bidx])
+                indices[bidx] = (indices_b[0][idx_mask], indices_b[1][idx_mask])
+        return indices
 
     def loss_t(self, outputs, targets, indices, num_boxes):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
         targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
         The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
         """
+        indices = self.filter_out_idxs_for_rel_pose(targets, indices)
         idx = self._get_src_permutation_idx(indices)
         src_ts = outputs["t"][idx]
         losses = {}
@@ -530,7 +567,10 @@ class SetCriterion(nn.Module):
             tgt_key_depth="center_depth"
             if self.use_rel_pose:
                 tgt_key_depth += "_rel"
-            target_depths = torch.cat([t[tgt_key_depth][i] for t, (_, i) in zip(targets, indices)], dim=0)
+            target_depths = ([t[tgt_key_depth][i] for t, (_, i) in zip(targets, indices) if len(t[tgt_key_depth])>0])
+            if len(target_depths)==0:
+                return {}
+            target_depths=torch.cat(target_depths, dim=0)
             loss_depth = F.mse_loss(src_depths, target_depths, reduction="none")
             losses["loss_depth"] = loss_depth.sum() / num_boxes
             tgt_key = "xy"
@@ -540,9 +580,12 @@ class SetCriterion(nn.Module):
         if self.use_rel_pose:
             tgt_key += "_rel"
 
-        target_ts = torch.cat([t[tgt_key][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        target_ts = ([t[tgt_key][i] for t, (_, i) in zip(targets, indices) if len(t[tgt_key])>0])
+        if len(target_ts)==0:
+            return {}
+        target_ts=torch.cat(target_ts, dim=0)
         loss_t = F.mse_loss(src_ts, target_ts, reduction="none")
-        losses["loss_t"] = loss_t.sum() / num_boxes
+        losses["loss_t"] = loss_t
 
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
         return losses
@@ -615,6 +658,8 @@ class SetCriterion(nn.Module):
                     if loss == 'labels':
                         # Logging is enabled only for the last layer
                         kwargs = {'log': False}
+                    if loss == "factors" and "factors" not in aux_outputs:
+                        continue
                     l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_boxes, **kwargs)
                     l_dict = {k + f'_{i}': v for k, v in l_dict.items()}
                     losses.update(l_dict)
