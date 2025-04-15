@@ -542,8 +542,13 @@ class SetCriterion(nn.Module):
         target_rots=torch.cat(target_rots, dim=0)
         losses = {}
         loss_rot = F.mse_loss(src_rots, target_rots, reduction="none")
-        losses["loss_rot"] = loss_rot
 
+        if self.use_factors:
+            log_var, var = self.get_uncertainty(outputs, idx)
+            # loss_rot = log_var + loss_rot / var - 1 + 0.5 * torch.abs(var)
+            loss_rot = loss_rot * var - self.uncertainty_coef * log_var
+
+        losses["loss_rot"] = loss_rot
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
         return losses
 
@@ -592,8 +597,12 @@ class SetCriterion(nn.Module):
         target_ts=torch.cat(target_ts, dim=0)
         loss_t = F.mse_loss(src_ts, target_ts, reduction="none")
         losses["loss_t"] = loss_t
-
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
+
+        if self.use_factors:
+            # log_var, var = self.get_uncertainty(outputs, idx)
+            # loss_t = log_var + loss_t / var - 1 + 0.5 * torch.abs(var)
+            # loss_t = loss_t * var - self.uncertainty_coef * log_var
         return losses
 
     def _get_src_permutation_idx(self, indices):
@@ -647,6 +656,9 @@ class SetCriterion(nn.Module):
 
         # Compute all the requested losses
         losses = {}
+        for loss in self.losses:
+            loss_value = self.get_loss(loss, outputs, targets, indices, num_boxes)
+            losses.update(loss_value)
         if self.use_factors:
             indices = self.filter_out_idxs_for_rel_pose(targets, indices)
             idx = self._get_src_permutation_idx(indices)
@@ -703,6 +715,11 @@ class SetCriterion(nn.Module):
                 losses.update(l_dict)
 
         return losses
+
+    def get_uncertainty(self, outputs, idx):
+        log_var = outputs["uncertainty"][idx][:, None].clamp(min=-5, max=0)
+        var = torch.exp(log_var)
+        return log_var, var
 
 
 class PostProcess(nn.Module):
