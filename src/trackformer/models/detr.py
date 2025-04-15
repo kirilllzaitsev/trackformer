@@ -6,8 +6,12 @@ import copy
 
 import torch
 import torch.nn.functional as F
+from pose_tracking.losses import geodesic_loss_mat_sym
+from pose_tracking.metrics import calc_r_error, calc_t_error
+from pose_tracking.utils.geom import convert_2d_t_to_3d
 from pose_tracking.utils.kpt_utils import load_extractor
 from pose_tracking.utils.misc import init_params, print_cls
+from pose_tracking.utils.pose import convert_rot_vector_to_matrix
 from torch import nn
 
 from trackformer.util import box_ops
@@ -46,7 +50,8 @@ class DETR(nn.Module):
         use_kpts_as_img=False,
         head_num_layers=2,
         head_hidden_dim=None,
-        r_num_layers_inc=0
+        r_num_layers_inc=0,
+        uncertainty_coef=0.1,
     ):
         """Initializes the model.
         Parameters:
@@ -71,6 +76,8 @@ class DETR(nn.Module):
         self.dropout = dropout
         self.dropout_heads = dropout_heads
         self.head_num_layers = head_num_layers
+        self.r_num_layers_inc = r_num_layers_inc
+        self.uncertainty_coef = uncertainty_coef
 
         self.do_predict_2d_t = t_out_dim == 2
         self.head_hidden_dim = head_hidden_dim or transformer.d_model
@@ -266,6 +273,7 @@ class SetCriterion(nn.Module):
         use_rel_pose=False,
         use_pose_refinement=False,
         factors=None,
+        uncertainty_coef=0.1,
     ):
         """Create the criterion.
         Parameters:
@@ -543,13 +551,22 @@ class SetCriterion(nn.Module):
         losses = {}
         loss_rot = F.mse_loss(src_rots, target_rots, reduction="none")
 
-        if self.use_factors:
-            log_var, var = self.get_uncertainty(outputs, idx)
-            # loss_rot = log_var + loss_rot / var - 1 + 0.5 * torch.abs(var)
-            loss_rot = loss_rot * var - self.uncertainty_coef * log_var
-
         losses["loss_rot"] = loss_rot
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
+
+        if self.use_factors:
+            target_rot_mats = convert_rot_vector_to_matrix(target_rots)
+            src_rot_mats = convert_rot_vector_to_matrix(src_rots)
+            r_err_deg = geodesic_loss_mat_sym(
+                src_rot_mats,
+                target_rot_mats,
+                handle_visibility=False,
+                class_name="",
+                do_return_deg=True,
+                do_reduce=False,
+            )
+            losses["r_err_deg"] = r_err_deg
+
         return losses
 
     def filter_out_idxs_for_rel_pose(self, targets, indices):
@@ -600,9 +617,27 @@ class SetCriterion(nn.Module):
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
 
         if self.use_factors:
-            # log_var, var = self.get_uncertainty(outputs, idx)
-            # loss_t = log_var + loss_t / var - 1 + 0.5 * torch.abs(var)
-            # loss_t = loss_t * var - self.uncertainty_coef * log_var
+            if self.t_out_dim == 2:
+                src_depths = outputs["center_depth"][idx]
+                intrinsics = torch.stack(
+                    [t["intrinsics"] for t, (_, _) in zip(targets, indices)]
+                )
+                hw = torch.stack([t["size"] for t, (_, _) in zip(targets, indices)])
+                convert_2d_t_pred_to_3d_res = convert_2d_t_to_3d(
+                    src_ts, src_depths, intrinsics, hw=hw
+                )
+                src_ts_3d = convert_2d_t_pred_to_3d_res["t_pred"]
+                target_ts_3d = torch.stack(
+                    [t["t"] for t, (_, _) in zip(targets, indices)]
+                )
+                # TODO: predicting 2d and calc uncertainty in 3d seems suboptimal
+            else:
+                src_ts_3d = src_ts
+                target_ts_3d = target_ts
+
+            t_err_cm = calc_t_error(src_ts_3d, target_ts_3d, do_reduce=False) * 1e2
+            losses["t_err_cm"] = t_err_cm
+
         return losses
 
     def _get_src_permutation_idx(self, indices):
@@ -662,19 +697,14 @@ class SetCriterion(nn.Module):
         if self.use_factors:
             indices = self.filter_out_idxs_for_rel_pose(targets, indices)
             idx = self._get_src_permutation_idx(indices)
-            log_var = outputs["uncertainty"][idx]
-            var = torch.exp(log_var)
-            losses["uncertainty"] = var
-        for loss in self.losses:
-            loss_value = self.get_loss(loss, outputs, targets, indices, num_boxes)
+            log_var, var = self.get_uncertainty(outputs, idx)
+            r_err_deg, t_err_cm = losses["r_err_deg"], losses["t_err_cm"]
+            r_err_ind = r_err_deg < 5
+            t_err_ind = t_err_cm < 5
+            gt_confidence = r_err_ind * t_err_ind
 
-            if self.use_factors and loss in ["rot", "t"]:
-                loss_key = "loss_" + loss
-                loss_scalar = loss_value[loss_key]
-                loss_value[loss_key] = (
-                   log_var + loss_scalar / var - 1 + 0.5 * torch.abs(var)
-                )
-            losses.update(loss_value)
+            # might benefit from temporal weight decay across time (confidence decreases proportial to tracking length)
+            losses["uncertainty"] = F.binary_cross_entropy(var, gt_confidence.float())
         losses['indices'] = indices
 
         # In case of auxiliary losses, we repeat this process with the
