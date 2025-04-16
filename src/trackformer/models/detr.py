@@ -752,6 +752,18 @@ class SetCriterion(nn.Module):
         return log_var, var
 
 
+def error_to_confidence(err, min_err=5.0, max_err=30.0):
+    """
+    Given an error value, returns a confidence value between 0 and 1,
+    where err <= min_err => 1.0 and err >= max_err => 0.0.
+    Errors in between are linearly mapped.
+    """
+    # Linear mapping:
+    conf = 1.0 - (err - min_err) / (max_err - min_err)
+    # Clamp to [0, 1]:
+    return torch.clamp(conf, 0.0, 1.0)
+
+
 class PostProcess(nn.Module):
     """ This module converts the model's output into the format expected by the coco api"""
 
