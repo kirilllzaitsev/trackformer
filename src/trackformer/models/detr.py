@@ -6,7 +6,7 @@ import copy
 
 import torch
 import torch.nn.functional as F
-from pose_tracking.losses import geodesic_loss_mat_sym
+from pose_tracking.losses import geodesic_loss_mat
 from pose_tracking.metrics import calc_r_error, calc_t_error
 from pose_tracking.utils.geom import convert_2d_t_to_3d
 from pose_tracking.utils.kpt_utils import load_extractor
@@ -556,12 +556,11 @@ class SetCriterion(nn.Module):
 
         if self.use_factors:
             target_rot_mats = convert_rot_vector_to_matrix(target_rots)
-            src_rot_mats = convert_rot_vector_to_matrix(src_rots)
-            r_err_deg = geodesic_loss_mat_sym(
+            src_rot_mats = convert_rot_vector_to_matrix(src_rots).detach()
+            r_err_deg = geodesic_loss_mat(
                 src_rot_mats,
                 target_rot_mats,
-                handle_visibility=False,
-                class_name="",
+                sym_type="",
                 do_return_deg=True,
                 do_reduce=False,
             )
@@ -627,13 +626,14 @@ class SetCriterion(nn.Module):
                     src_ts, src_depths, intrinsics, hw=hw
                 )
                 src_ts_3d = convert_2d_t_pred_to_3d_res["t_pred"]
-                target_ts_3d = torch.stack(
+                target_ts_3d = torch.cat(
                     [t["t"] for t, (_, _) in zip(targets, indices)]
                 )
                 # TODO: predicting 2d and calc uncertainty in 3d seems suboptimal
             else:
                 src_ts_3d = src_ts
                 target_ts_3d = target_ts
+            src_ts_3d = src_ts_3d.detach()
 
             t_err_cm = calc_t_error(src_ts_3d, target_ts_3d, do_reduce=False) * 1e2
             losses["t_err_cm"] = t_err_cm
@@ -698,14 +698,18 @@ class SetCriterion(nn.Module):
             indices = self.filter_out_idxs_for_rel_pose(targets, indices)
             idx = self._get_src_permutation_idx(indices)
             log_var, var = self.get_uncertainty(outputs, idx)
-            r_err_deg, t_err_cm = losses["r_err_deg"], losses["t_err_cm"]
-            r_err_ind = r_err_deg < 5
-            t_err_ind = t_err_cm < 5
+            r_err_deg, t_err_cm = losses.pop("r_err_deg"), losses.pop("t_err_cm")
+            r_err_ind = error_to_confidence(r_err_deg, min_err=5.0, max_err=30.0)
+            t_err_ind = error_to_confidence(t_err_cm, min_err=3.0, max_err=30.0)
             gt_confidence = r_err_ind * t_err_ind
 
             # might benefit from temporal weight decay across time (confidence decreases proportial to tracking length)
-            losses["uncertainty"] = F.binary_cross_entropy(var, gt_confidence.float())
-        losses['indices'] = indices
+            var = var.squeeze(-1)
+            losses["confidence"] = var.detach().mean()
+            losses["loss_uncertainty"] = F.binary_cross_entropy(
+                var, gt_confidence.float()
+            )
+        losses["indices"] = indices
 
         # In case of auxiliary losses, we repeat this process with the
         # output of each intermediate layer.
@@ -722,8 +726,13 @@ class SetCriterion(nn.Module):
                         kwargs = {'log': False}
                     if loss == "factors" and "factors" not in aux_outputs:
                         continue
-                    l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_boxes, **kwargs)
-                    l_dict = {k + f'_{i}': v for k, v in l_dict.items()}
+                    l_dict = self.get_loss(
+                        loss, aux_outputs, targets, indices, num_boxes, **kwargs
+                    )
+                    for k in ["r_err_deg", "t_err_cm"]:
+                        if k in l_dict:
+                            l_dict.pop(k)
+                    l_dict = {k + f"_{i}": v for k, v in l_dict.items()}
                     losses.update(l_dict)
 
         if 'enc_outputs' in outputs:
