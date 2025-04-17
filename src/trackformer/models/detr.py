@@ -696,19 +696,8 @@ class SetCriterion(nn.Module):
             losses.update(loss_value)
         if self.use_factors:
             indices = self.filter_out_idxs_for_rel_pose(targets, indices)
-            idx = self._get_src_permutation_idx(indices)
-            log_var, var = self.get_uncertainty(outputs, idx)
-            r_err_deg, t_err_cm = losses.pop("r_err_deg"), losses.pop("t_err_cm")
-            r_err_ind = error_to_confidence(r_err_deg, min_err=5.0, max_err=30.0)
-            t_err_ind = error_to_confidence(t_err_cm, min_err=3.0, max_err=30.0)
-            gt_confidence = r_err_ind * t_err_ind
-
-            # might benefit from temporal weight decay across time (confidence decreases proportial to tracking length)
-            var = var.squeeze(-1)
-            losses["confidence"] = var.detach().mean()
-            losses["loss_uncertainty"] = F.binary_cross_entropy(
-                var, gt_confidence.float()
-            )
+            get_uncertainty_loss_res = self.get_uncertainty_loss(outputs, indices=indices, r_err_deg=losses.pop("r_err_deg"), t_err_cm=losses.pop("t_err_cm"))
+            losses.update(get_uncertainty_loss_res)
         losses["indices"] = indices
 
         # In case of auxiliary losses, we repeat this process with the
@@ -729,11 +718,11 @@ class SetCriterion(nn.Module):
                     l_dict = self.get_loss(
                         loss, aux_outputs, targets, indices, num_boxes, **kwargs
                     )
-                    for k in ["r_err_deg", "t_err_cm"]:
-                        if k in l_dict:
-                            l_dict.pop(k)
                     l_dict = {k + f"_{i}": v for k, v in l_dict.items()}
                     losses.update(l_dict)
+                if f"r_err_deg_{i}" in losses and f"t_err_cm_{i}" in losses:
+                    get_uncertainty_loss_res = self.get_uncertainty_loss(aux_outputs, indices=indices, r_err_deg=losses.pop(f"r_err_deg_{i}"), t_err_cm=losses.pop(f"t_err_cm_{i}"))
+                    losses.update({f"{k}_{i}":v for k,v in get_uncertainty_loss_res.items()})
 
         if 'enc_outputs' in outputs:
             enc_outputs = outputs['enc_outputs']
@@ -754,6 +743,24 @@ class SetCriterion(nn.Module):
                 losses.update(l_dict)
 
         return losses
+
+    def get_uncertainty_loss(self, outputs, indices, r_err_deg, t_err_cm):
+        idx = self._get_src_permutation_idx(indices)
+        log_var, var = self.get_uncertainty(outputs, idx)
+        r_err_ind = error_to_confidence(r_err_deg, min_err=5.0, max_err=30.0)
+        t_err_ind = error_to_confidence(t_err_cm, min_err=3.0, max_err=30.0)
+        gt_confidence = r_err_ind * t_err_ind
+
+        # might benefit from temporal weight decay across time (confidence decreases proportial to tracking length)
+        var = var.squeeze(-1)
+        loss_uncertainty = F.binary_cross_entropy(
+                var, gt_confidence.float()
+            )
+        confidence = var.detach().mean()
+        return {
+            "loss_uncertainty": loss_uncertainty,
+            "confidence": confidence,
+        }
 
     def get_uncertainty(self, outputs, idx):
         log_var = outputs["uncertainty"][idx][:, None].clamp(min=-5, max=0)
