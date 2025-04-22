@@ -19,6 +19,7 @@ class DETRTrackingBase(nn.Module):
                  track_query_false_positive_prob: float = 0.0,
                  track_query_false_negative_prob: float = 0.0,
                  matcher: HungarianMatcher = None,
+                 use_only_det=False,
                  backprop_prev_frame=False):
         self._matcher = matcher
         self._track_query_false_positive_prob = track_query_false_positive_prob
@@ -26,6 +27,8 @@ class DETRTrackingBase(nn.Module):
         self._backprop_prev_frame = backprop_prev_frame
 
         self._tracking = False
+        
+        self.use_only_det=use_only_det
 
     def train(self, mode: bool = True):
         """Sets the module in train mode."""
@@ -233,7 +236,7 @@ class DETRTrackingBase(nn.Module):
             prev_targets = [target['prev_target'] for target in targets]
 
             # if self.training and random.uniform(0, 1) < 0.5:
-            if self.training:
+            if self.training and not self.use_only_det:
             # if True:
                 backprop_context = torch.no_grad
                 if self._backprop_prev_frame:
