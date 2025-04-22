@@ -69,6 +69,7 @@ def build_model(args, num_classes=None):
         'track_query_false_positive_prob': args.track_query_false_positive_prob,
         'track_query_false_negative_prob': args.track_query_false_negative_prob,
         'matcher': matcher,
+        'use_only_det': getattr(args, "use_only_det", False),
         'backprop_prev_frame': args.track_backprop_prev_frame,}
 
     mask_kwargs = {
@@ -133,6 +134,7 @@ def build_criterion(args, num_classes, matcher, device, use_rel_pose=False):
                    'loss_factors_scale': 1,
                    'loss_factors_occlusion': 1,
                    'loss_factors_texture': 1,
+                   'loss_uncertainty': getattr(args, "uncertainty_loss_coef", 1),
                    "loss_rot": getattr(args, "rot_loss_coef", 1),
                    "loss_depth": getattr(args, "depth_loss_coef", 1),
                    "loss_t": getattr(args, "t_loss_coef", 1)}
@@ -178,6 +180,7 @@ def build_criterion(args, num_classes, matcher, device, use_rel_pose=False):
         use_rel_pose=use_rel_pose,
         track_query_false_positive_eos_weight=args.track_query_false_positive_eos_weight,
         factors=args.factors,
+        uncertainty_coef=args.uncertainty_coef,
     )
     criterion.to(device)
     return criterion
