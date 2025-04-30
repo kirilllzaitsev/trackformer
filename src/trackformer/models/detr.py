@@ -308,7 +308,7 @@ class SetCriterion(nn.Module):
         self.use_pose_refinement = use_pose_refinement
 
         self.use_factors = factors is not None
-        self.device='cuda'
+        self.focal_alpha_confidence = 0.5
         self.mean_delta_t, self.mean_delta_rot = (
                     torch.tensor([0.0287253, 0.0011501, 0.0197429], device=self.device),
                     torch.tensor(
@@ -519,11 +519,18 @@ class SetCriterion(nn.Module):
         idx = self._get_src_permutation_idx(indices)
         losses = {}
         for f in self.factors:
-            src_rots = outputs["factors"][f].cpu()[idx].cuda()
-            target_rots = torch.cat(
-                [t['factors'][f][i] for t, (_, i) in zip(targets, indices)], dim=0
-            ).unsqueeze(-1).float()
-            loss_f = F.binary_cross_entropy(src_rots, target_rots, reduction="none")
+            src_f_logits = outputs["factors"][f].cpu()[idx].cuda()
+            target_fs = (
+                torch.cat(
+                    [t["factors"][f][i] for t, (_, i) in zip(targets, indices)], dim=0
+                )
+                .unsqueeze(-1)
+                .float()
+            )
+            target_f_buckets = bucketize_soft_labels(target_f_buckets, num_buckets=10)
+            loss_f = F.cross_entropy(
+                src_f_logits, target_f_buckets, reduction="none"
+            )
             losses[f"loss_factors_{f}"] = loss_f
 
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
