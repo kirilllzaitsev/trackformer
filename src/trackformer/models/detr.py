@@ -850,3 +850,13 @@ class MLP(nn.Module):
         for i, layer in enumerate(self.layers):
             x = self.dropout(F.relu(layer(x))) if i < self.num_layers - 1 else layer(x)
         return x
+
+
+def bucketize_soft_labels(soft_labels, num_buckets=10):
+    """
+    Convert soft labels in [0, 1] to class indices.
+    """
+    soft_labels = torch.clamp(soft_labels, 0.0, 1.0)
+    class_labels = (soft_labels * num_buckets).round().long()
+    class_labels = torch.clamp(class_labels, max=num_buckets - 1)
+    return class_labels
