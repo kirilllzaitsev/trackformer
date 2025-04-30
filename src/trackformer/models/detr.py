@@ -309,13 +309,6 @@ class SetCriterion(nn.Module):
 
         self.use_factors = factors is not None
         self.focal_alpha_confidence = 0.5
-        self.mean_delta_t, self.mean_delta_rot = (
-                    torch.tensor([0.0287253, 0.0011501, 0.0197429], device=self.device),
-                    torch.tensor(
-                        [0.01121484, 0.00856275, 0.00846249, 0.00392139, 0.00301261, 0.00935597], device=self.device
-                    ),
-                )
-        self.mean_delta_t, self.mean_delta_rot = 1,1
 
         if self.use_factors:
             self.losses.append("factors")
@@ -524,10 +517,9 @@ class SetCriterion(nn.Module):
                 torch.cat(
                     [t["factors"][f][i] for t, (_, i) in zip(targets, indices)], dim=0
                 )
-                .unsqueeze(-1)
                 .float()
             )
-            target_f_buckets = bucketize_soft_labels(target_f_buckets, num_buckets=10)
+            target_f_buckets = bucketize_soft_labels(target_fs, num_buckets=10)
             loss_f = F.cross_entropy(
                 src_f_logits, target_f_buckets, reduction="none"
             )
