@@ -753,29 +753,41 @@ class SetCriterion(nn.Module):
 
     def get_uncertainty_loss(self, outputs, indices, r_err_deg, t_err_cm):
         idx = self._get_src_permutation_idx(indices)
-        log_var, var = self.get_uncertainty(outputs, idx)
-        r_err_ind = error_to_confidence(r_err_deg, min_err=5.0, max_err=30.0)
-        t_err_ind = error_to_confidence(t_err_cm, min_err=3.0, max_err=30.0)
+        conf = self.get_uncertainty(outputs, idx)
+        r_err_ind = error_to_confidence(r_err_deg, min_err=1.0, max_err=30.0)
+        t_err_ind = error_to_confidence(t_err_cm, min_err=1.0, max_err=15.0)
         gt_confidence = r_err_ind * t_err_ind
 
         # might benefit from temporal weight decay across time (confidence decreases proportial to tracking length)
-        var = var.squeeze(-1)
-        loss_uncertainty = F.binary_cross_entropy(
-                var, gt_confidence.float()
-            )
-        confidence = var.detach().mean()
+        eps = 1e-3
+        conf = conf.squeeze(-1)
+        # loss_uncertainty = F.binary_cross_entropy_with_logits(
+        #     conf, gt_confidence.float().clamp(min=eps, max=1-eps)
+        # )
+        prob = conf.sigmoid()
+        targets = gt_confidence.float().clamp(min=eps, max=1 - eps)
+        ce_loss = F.binary_cross_entropy_with_logits(
+            conf, targets, reduction="none"
+        )
+        p_t = prob * targets + (1 - prob) * (1 - targets)
+        loss_uncertainty = ce_loss * ((1 - p_t) ** self.focal_gamma)
+        if self.focal_alpha_confidence >= 0:
+            alpha_t = self.focal_alpha_confidence * targets + (1 - self.focal_alpha_confidence) * (1 - targets)
+            loss_uncertainty = alpha_t * loss_uncertainty
+        confidence = prob.detach().mean()
         return {
-            "loss_uncertainty": loss_uncertainty,
+            "loss_uncertainty": loss_uncertainty.mean(),
             "confidence": confidence,
         }
 
     def get_uncertainty(self, outputs, idx):
-        log_var = outputs["uncertainty"][idx][:, None].clamp(min=-5, max=0)
-        var = torch.exp(log_var)
-        return log_var, var
+        # log_var = outputs["uncertainty"][idx][:, None].clamp(min=-10, max=0)
+        # var = torch.exp(log_var)
+        conf = outputs["uncertainty"][idx][:, None]
+        return conf
 
 
-def error_to_confidence(err, min_err=5.0, max_err=30.0):
+def error_to_confidence(err, min_err=1.0, max_err=30.0):
     """
     Given an error value, returns a confidence value between 0 and 1,
     where err <= min_err => 1.0 and err >= max_err => 0.0.
