@@ -562,11 +562,6 @@ class SetCriterion(nn.Module):
 
         losses["loss_rot"] = loss_rot
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
-
-        if self.use_uncertainty:
-            r_err_deg = self.calc_r_err_deg(outputs, targets, indices)
-            losses["r_err_deg"] = r_err_deg
-
         return losses
 
     def calc_r_err_deg(self, outputs, targets, indices):
@@ -631,11 +626,6 @@ class SetCriterion(nn.Module):
         loss_t = F.mse_loss(src_ts, target_ts, reduction="none")
         losses["loss_t"] = loss_t
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
-
-        if self.use_uncertainty:
-            t_err_cm = self.calc_t_err_cm(outputs, targets, indices)
-            losses["t_err_cm"] = t_err_cm
-
         return losses
 
     def calc_t_err_cm(self, outputs, targets, indices):
@@ -724,7 +714,7 @@ class SetCriterion(nn.Module):
             losses.update(loss_value)
         if self.use_uncertainty:
             indices = self.filter_out_idxs_for_rel_pose(targets, indices)
-            get_uncertainty_loss_res = self.get_uncertainty_loss(outputs, indices=indices, r_err_deg=losses.pop("r_err_deg"), t_err_cm=losses.pop("t_err_cm"))
+            get_uncertainty_loss_res = self.get_uncertainty_loss(outputs, targets, indices=indices)
             losses.update(get_uncertainty_loss_res)
         losses["indices"] = indices
 
@@ -749,7 +739,7 @@ class SetCriterion(nn.Module):
                     l_dict = {k + f"_{i}": v for k, v in l_dict.items()}
                     losses.update(l_dict)
                 if self.use_uncertainty:
-                    get_uncertainty_loss_res = self.get_uncertainty_loss(aux_outputs, indices=indices, r_err_deg=losses.pop(f"r_err_deg_{i}"), t_err_cm=losses.pop(f"t_err_cm_{i}"))
+                    get_uncertainty_loss_res = self.get_uncertainty_loss(aux_outputs, targets=targets, indices=indices)
                     losses.update({f"{k}_{i}":v for k,v in get_uncertainty_loss_res.items()})
 
         if 'enc_outputs' in outputs:
@@ -772,25 +762,41 @@ class SetCriterion(nn.Module):
 
         return losses
 
-    def get_uncertainty_loss(self, outputs, indices, r_err_deg, t_err_cm):
+    def get_uncertainty_loss(self, outputs, targets, indices):
         idx = self._get_src_permutation_idx(indices)
         conf = self.get_uncertainty(outputs, idx)
-        r_err_ind = error_to_confidence(r_err_deg, min_err=1.0, max_err=30.0)
-        t_err_ind = error_to_confidence(t_err_cm, min_err=1.0, max_err=15.0)
-        gt_confidence = r_err_ind * t_err_ind
 
-        # might benefit from temporal weight decay across time (confidence decreases proportial to tracking length)
         eps = 1e-3
         conf = conf.squeeze(-1)
         # loss_uncertainty = F.binary_cross_entropy_with_logits(
         #     conf, gt_confidence.float().clamp(min=eps, max=1-eps)
         # )
         prob = conf.sigmoid()
+        confidence = prob.detach().mean()
+
+        # pick up other indices to ensure the loss encounters negatives (with proper matching for n objs)
+        indices_other = copy.deepcopy(indices)
+        num_others = 1
+        if num_others > 0:
+            for bidx in range(len(indices)):
+                other_query_idxs = [random.choice([x for x in range(outputs['pred_logits'].shape[1]) if x not in indices[bidx][0].tolist()]) for _ in range(num_others)]
+                indices_other_bidx_pred = torch.cat([indices_other[bidx][0], torch.tensor(other_query_idxs)])
+                indices_other_bidx_gt = indices[bidx][1].repeat(num_others + 1)
+                indices_other[bidx] = (indices_other_bidx_pred, indices_other_bidx_gt)
+        idx = self._get_src_permutation_idx(indices_other)
+        conf_all = self.get_uncertainty(outputs, idx).squeeze(-1)
+        prob_all = conf_all.sigmoid()
+        r_err_deg_all = self.calc_r_err_deg(outputs, targets, indices_other)
+        t_err_cm_all = self.calc_t_err_cm(outputs, targets, indices_other)
+        r_err_ind = error_to_confidence(r_err_deg_all, min_err=1.0, max_err=30.0)
+        t_err_ind = error_to_confidence(t_err_cm_all, min_err=1.0, max_err=15.0)
+        gt_confidence = r_err_ind * t_err_ind
+
         targets = gt_confidence.float().clamp(min=eps, max=1 - eps)
         ce_loss = F.binary_cross_entropy_with_logits(
-            conf, targets, reduction="none"
+            conf_all, targets, reduction="none"
         )
-        p_t = prob * targets + (1 - prob) * (1 - targets)
+        p_t = prob_all * targets + (1 - prob_all) * (1 - targets)
         loss_uncertainty = ce_loss * ((1 - p_t) ** self.focal_gamma)
         if self.focal_alpha_confidence >= 0:
             alpha_t = self.focal_alpha_confidence * targets + (1 - self.focal_alpha_confidence) * (1 - targets)
