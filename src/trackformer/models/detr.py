@@ -274,6 +274,7 @@ class SetCriterion(nn.Module):
         use_pose_refinement=False,
         factors=None,
         uncertainty_coef=0.1,
+        use_uncertainty=False,
     ):
         """Create the criterion.
         Parameters:
@@ -306,12 +307,24 @@ class SetCriterion(nn.Module):
         
         self.use_rel_pose = use_rel_pose
         self.use_pose_refinement = use_pose_refinement
+        self.use_uncertainty = use_uncertainty
 
         self.use_factors = factors is not None
         self.focal_alpha_confidence = 0.5
 
         if self.use_factors:
             self.losses.append("factors")
+
+        if self.t_out_dim == 2:
+            self.tgt_key_t = "xy"
+        else:
+            self.tgt_key_t = "t"
+
+        if self.use_rel_pose:
+            self.tgt_key_rot = "rot_rel"
+            self.tgt_key_t += "_rel"
+        else:
+            self.tgt_key_rot = "rot"
 
     def __repr__(self):
         return print_cls(self, extra_str=super().__repr__())
@@ -538,12 +551,9 @@ class SetCriterion(nn.Module):
         idx = self._get_src_permutation_idx(indices)
 
         src_rots = outputs["rot"][idx]
-        tgt_key = "rot_rel" if self.use_rel_pose else "rot"
         target_rots = (
-            [t[tgt_key][i] for t, (_, i) in zip(targets, indices) if len(t[tgt_key])>0]
+            [t[self.tgt_key_rot][i] for t, (_, i) in zip(targets, indices) if len(t[self.tgt_key_rot])>0]
         )
-        # if self.use_rel_pose:
-        #     target_rots = [r[valid_target_idxs[i]] for i, r in enumerate(target_rots)]
         if len(target_rots)==0:
             return {}
         target_rots=torch.cat(target_rots, dim=0)
@@ -599,14 +609,8 @@ class SetCriterion(nn.Module):
             target_depths=torch.cat(target_depths, dim=0)
             loss_depth = F.mse_loss(src_depths, target_depths, reduction="none")
             losses["loss_depth"] = loss_depth.sum() / num_boxes
-            tgt_key = "xy"
-        else:
-            tgt_key = "t"
 
-        if self.use_rel_pose:
-            tgt_key += "_rel"
-
-        target_ts = ([t[tgt_key][i] for t, (_, i) in zip(targets, indices) if len(t[tgt_key])>0])
+        target_ts = ([t[self.tgt_key_t][i] for t, (_, i) in zip(targets, indices) if len(t[self.tgt_key_t])>0])
         if len(target_ts)==0:
             return {}
         target_ts=torch.cat(target_ts, dim=0)
@@ -693,7 +697,7 @@ class SetCriterion(nn.Module):
         for loss in self.losses:
             loss_value = self.get_loss(loss, outputs, targets, indices, num_boxes)
             losses.update(loss_value)
-        if self.use_factors:
+        if self.use_uncertainty:
             indices = self.filter_out_idxs_for_rel_pose(targets, indices)
             get_uncertainty_loss_res = self.get_uncertainty_loss(outputs, indices=indices, r_err_deg=losses.pop("r_err_deg"), t_err_cm=losses.pop("t_err_cm"))
             losses.update(get_uncertainty_loss_res)
@@ -719,7 +723,7 @@ class SetCriterion(nn.Module):
                     )
                     l_dict = {k + f"_{i}": v for k, v in l_dict.items()}
                     losses.update(l_dict)
-                if f"r_err_deg_{i}" in losses and f"t_err_cm_{i}" in losses:
+                if self.use_uncertainty:
                     get_uncertainty_loss_res = self.get_uncertainty_loss(aux_outputs, indices=indices, r_err_deg=losses.pop(f"r_err_deg_{i}"), t_err_cm=losses.pop(f"t_err_cm_{i}"))
                     losses.update({f"{k}_{i}":v for k,v in get_uncertainty_loss_res.items()})
 
