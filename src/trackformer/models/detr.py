@@ -563,19 +563,33 @@ class SetCriterion(nn.Module):
         losses["loss_rot"] = loss_rot
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
 
-        if self.use_factors:
-            target_rot_mats = convert_rot_vector_to_matrix(target_rots)
-            src_rot_mats = convert_rot_vector_to_matrix(src_rots).detach()
-            r_err_deg = geodesic_loss_mat(
-                src_rot_mats,
-                target_rot_mats,
-                sym_type="",
-                do_return_deg=True,
-                do_reduce=False,
-            )
+        if self.use_uncertainty:
+            r_err_deg = self.calc_r_err_deg(outputs, targets, indices)
             losses["r_err_deg"] = r_err_deg
 
         return losses
+
+    def calc_r_err_deg(self, outputs, targets, indices):
+        idx = self._get_src_permutation_idx(indices)
+        src_rots = outputs["rot"][idx]
+        target_rots = [
+            t[self.tgt_key_rot][i]
+            for t, (_, i) in zip(targets, indices)
+            if len(t[self.tgt_key_rot]) > 0
+        ]
+        if len(target_rots) == 0:
+            return torch.zeros(src_rots.shape[0], device=src_rots.device)
+        target_rots = torch.cat(target_rots, dim=0)
+        target_rot_mats = convert_rot_vector_to_matrix(target_rots)
+        src_rot_mats = convert_rot_vector_to_matrix(src_rots).detach()
+        r_err_deg = geodesic_loss_mat(
+            src_rot_mats,
+            target_rot_mats,
+            sym_type="",
+            do_return_deg=True,
+            do_reduce=False,
+        )
+        return r_err_deg
 
     def filter_out_idxs_for_rel_pose(self, targets, indices):
         indices = copy.deepcopy(indices)
@@ -618,30 +632,41 @@ class SetCriterion(nn.Module):
         losses["loss_t"] = loss_t
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
 
-        if self.use_factors:
-            if self.t_out_dim == 2:
-                src_depths = outputs["center_depth"][idx]
-                intrinsics = torch.stack(
-                    [t["intrinsics"] for t, (_, _) in zip(targets, indices)]
-                )
-                hw = torch.stack([t["size"] for t, (_, _) in zip(targets, indices)])
-                convert_2d_t_pred_to_3d_res = convert_2d_t_to_3d(
-                    src_ts, src_depths, intrinsics, hw=hw
-                )
-                src_ts_3d = convert_2d_t_pred_to_3d_res["t_pred"]
-                target_ts_3d = torch.cat(
-                    [t["t"] for t, (_, _) in zip(targets, indices)]
-                )
-                # TODO: predicting 2d and calc uncertainty in 3d seems suboptimal
-            else:
-                src_ts_3d = src_ts
-                target_ts_3d = target_ts
-            src_ts_3d = src_ts_3d.detach()
-
-            t_err_cm = calc_t_error(src_ts_3d, target_ts_3d, do_reduce=False) * 1e2
+        if self.use_uncertainty:
+            t_err_cm = self.calc_t_err_cm(outputs, targets, indices)
             losses["t_err_cm"] = t_err_cm
 
         return losses
+
+    def calc_t_err_cm(self, outputs, targets, indices):
+        idx = self._get_src_permutation_idx(indices)
+        src_ts = outputs["t"][idx]
+        target_ts = [
+            t[self.tgt_key_t][i]
+            for t, (_, i) in zip(targets, indices)
+            if len(t[self.tgt_key_t]) > 0
+        ]
+        if len(target_ts) == 0:
+            return torch.zeros(src_ts.shape[0], device=src_ts.device)
+        target_ts = torch.cat(target_ts, dim=0)
+        if self.t_out_dim == 2:
+            src_depths = outputs["center_depth"][idx]
+            intrinsics = torch.stack(
+                [t["intrinsics"] for t, (_, _) in zip(targets, indices)]
+            )
+            hw = torch.stack([t["size"] for t, (_, _) in zip(targets, indices)])
+            convert_2d_t_pred_to_3d_res = convert_2d_t_to_3d(
+                src_ts, src_depths, intrinsics, hw=hw
+            )
+            src_ts_3d = convert_2d_t_pred_to_3d_res["t_pred"]
+            target_ts_3d = torch.cat([t["t"] for t, (_, _) in zip(targets, indices)])
+        else:
+            src_ts_3d = src_ts
+            target_ts_3d = target_ts
+        src_ts_3d = src_ts_3d.detach()
+
+        t_err_cm = calc_t_error(src_ts_3d, target_ts_3d, do_reduce=False) * 1e2
+        return t_err_cm
 
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
