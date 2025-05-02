@@ -131,9 +131,9 @@ def build_criterion(args, num_classes, matcher, device, use_rel_pose=False):
     weight_dict = {'loss_ce': args.cls_loss_coef,
                    'loss_bbox': args.bbox_loss_coef,
                    'loss_giou': args.giou_loss_coef,
-                   'loss_factors_scale': 1,
-                   'loss_factors_occlusion': 1,
-                   'loss_factors_texture': 1,
+                   'loss_factors_scale': 0.2*1,
+                   'loss_factors_occlusion': 0.2*1,
+                   'loss_factors_texture': 0.2*1,
                    'loss_uncertainty': getattr(args, "uncertainty_loss_coef", 1),
                    "loss_rot": getattr(args, "rot_loss_coef", 1),
                    "loss_depth": getattr(args, "depth_loss_coef", 1),
@@ -181,6 +181,7 @@ def build_criterion(args, num_classes, matcher, device, use_rel_pose=False):
         track_query_false_positive_eos_weight=args.track_query_false_positive_eos_weight,
         factors=args.factors,
         uncertainty_coef=args.uncertainty_coef,
+        use_uncertainty=args.use_uncertainty,
     )
     criterion.to(device)
     return criterion
