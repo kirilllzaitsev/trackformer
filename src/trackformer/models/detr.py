@@ -3,6 +3,7 @@
 DETR model and criterion classes.
 """
 import copy
+import random
 
 import torch
 import torch.nn.functional as F
@@ -94,7 +95,7 @@ class DETR(nn.Module):
 
         if use_kpts:
             self.extractor = load_extractor(features="superpoint", max_num_keypoints=1024)
-            if use_kpts_as_ref_pt:
+            if use_kpts_as_ref_pt or use_kpts_as_img:
                 for p in self.extractor.parameters():
                     p.requires_grad = False
 
@@ -116,7 +117,7 @@ class DETR(nn.Module):
         init_params(self, included_names=['rot_embed', 't_embed', 'depth_embed'])
 
         if use_kpts_as_img:
-            self.backbone=None
+            self.backbone=self.extractor
         else:
             # match interface with deformable DETR
             self.input_proj = nn.Conv2d(backbone.num_channels[-1], self.hidden_dim, kernel_size=1)
@@ -304,7 +305,7 @@ class SetCriterion(nn.Module):
         )
         self.t_out_dim = t_out_dim
         self.factors=factors
-        
+
         self.use_rel_pose = use_rel_pose
         self.use_pose_refinement = use_pose_refinement
         self.use_uncertainty = use_uncertainty
@@ -540,6 +541,28 @@ class SetCriterion(nn.Module):
 
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
         return losses
+    
+    def extract_factors(self, outputs, targets, indices):
+        idx = self._get_src_permutation_idx(indices)
+        factors = {}
+        for f in self.factors:
+            src_f_logits = outputs["factors"][f].cpu()[idx].cuda()
+            target_fs = (
+                torch.cat(
+                    [t["factors"][f][i] for t, (_, i) in zip(targets, indices)], dim=0
+                )
+                .float()
+            )
+            target_f_buckets = bucketize_soft_labels(target_fs, num_buckets=10)
+            pred_probs = F.softmax(src_f_logits, dim=-1)
+            factors[f] = {
+                "pred_probs": pred_probs,
+                "pred_buckets": pred_probs.argmax(-1),
+                "target_buckets": target_f_buckets,
+                "target": target_fs,
+            }
+
+        return factors
 
     def loss_rot(self, outputs, targets, indices, num_boxes):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
@@ -762,56 +785,78 @@ class SetCriterion(nn.Module):
 
         return losses
 
-    def get_uncertainty_loss(self, outputs, targets, indices):
-        idx = self._get_src_permutation_idx(indices)
-        conf = self.get_uncertainty(outputs, idx)
-
-        eps = 1e-3
-        conf = conf.squeeze(-1)
-        # loss_uncertainty = F.binary_cross_entropy_with_logits(
-        #     conf, gt_confidence.float().clamp(min=eps, max=1-eps)
-        # )
-        prob = conf.sigmoid()
-        confidence = prob.detach().mean()
-
+    def get_uncertainty_loss(self, outputs, targets, indices, eps=1e-3):
         # pick up other indices to ensure the loss encounters negatives (with proper matching for n objs)
         indices_other = copy.deepcopy(indices)
+        num_others = 0
         num_others = 1
+        num_others = 2
+        num_others = 3
         if num_others > 0:
             for bidx in range(len(indices)):
-                other_query_idxs = [random.choice([x for x in range(outputs['pred_logits'].shape[1]) if x not in indices[bidx][0].tolist()]) for _ in range(num_others)]
-                indices_other_bidx_pred = torch.cat([indices_other[bidx][0], torch.tensor(other_query_idxs)])
+                other_query_idxs = [
+                    random.choice(
+                        [
+                            x
+                            for x in range(outputs["pred_logits"].shape[1])
+                            if x not in indices[bidx][0].tolist()
+                        ]
+                    )
+                    for _ in range(num_others)
+                ]
+                indices_other_bidx_pred = torch.cat(
+                    [indices_other[bidx][0], torch.tensor(other_query_idxs)]
+                )
                 indices_other_bidx_gt = indices[bidx][1].repeat(num_others + 1)
                 indices_other[bidx] = (indices_other_bidx_pred, indices_other_bidx_gt)
-        idx = self._get_src_permutation_idx(indices_other)
-        conf_all = self.get_uncertainty(outputs, idx).squeeze(-1)
-        prob_all = conf_all.sigmoid()
+        idx_all = self._get_src_permutation_idx(indices_other)
+        conf_rt = self.get_uncertainty(outputs, idx_all)
         r_err_deg_all = self.calc_r_err_deg(outputs, targets, indices_other)
         t_err_cm_all = self.calc_t_err_cm(outputs, targets, indices_other)
         r_err_ind = error_to_confidence(r_err_deg_all, min_err=1.0, max_err=30.0)
         t_err_ind = error_to_confidence(t_err_cm_all, min_err=1.0, max_err=15.0)
-        gt_confidence = r_err_ind * t_err_ind
+        loss_uncertainty_rt = {}
+        for k, conf_one in conf_rt.items():
+            prob_one = conf_one.sigmoid()
+            gt_confidence = r_err_ind if k == "rot" else t_err_ind
 
-        targets = gt_confidence.float().clamp(min=eps, max=1 - eps)
-        ce_loss = F.binary_cross_entropy_with_logits(
-            conf_all, targets, reduction="none"
-        )
-        p_t = prob_all * targets + (1 - prob_all) * (1 - targets)
-        loss_uncertainty = ce_loss * ((1 - p_t) ** self.focal_gamma)
-        if self.focal_alpha_confidence >= 0:
-            alpha_t = self.focal_alpha_confidence * targets + (1 - self.focal_alpha_confidence) * (1 - targets)
-            loss_uncertainty = alpha_t * loss_uncertainty
-        confidence = prob.detach().mean()
+            targets_one = gt_confidence.float().clamp(min=eps, max=1 - eps)
+            ce_loss = F.binary_cross_entropy_with_logits(
+                conf_one, targets_one, reduction="none"
+            )
+            p_t = prob_one * targets_one + (1 - prob_one) * (1 - targets_one)
+            loss_uncertainty = ce_loss * ((1 - p_t) ** self.focal_gamma)
+            if self.focal_alpha_confidence >= 0:
+                alpha_t = self.focal_alpha_confidence * targets_one + (
+                    1 - self.focal_alpha_confidence
+                ) * (1 - targets_one)
+                loss_uncertainty = alpha_t * loss_uncertainty
+            loss_uncertainty_rt[k] = loss_uncertainty.mean()
+
+        idx = self._get_src_permutation_idx(indices)
+        conf_rt_matched = self.get_uncertainty(outputs, idx)
+        prob_rt_matched = {
+            k: v.sigmoid().detach().mean() for k, v in conf_rt_matched.items()
+        }
+        conf_r_matched = prob_rt_matched["rot"]
+        conf_t_matched = prob_rt_matched["t"]
+        confidence = 0.5 * (conf_r_matched + conf_t_matched)
         return {
-            "loss_uncertainty": loss_uncertainty.mean(),
+            "loss_uncertainty": 0.5
+            * (loss_uncertainty_rt["rot"] + loss_uncertainty_rt["t"]),
             "confidence": confidence,
+            "loss_uncertainty_rot": loss_uncertainty_rt["rot"],
+            "loss_uncertainty_t": loss_uncertainty_rt["t"],
+            "confidence_rot": conf_r_matched.mean(),
+            "confidence_t": conf_t_matched.mean(),
         }
 
     def get_uncertainty(self, outputs, idx):
         # log_var = outputs["uncertainty"][idx][:, None].clamp(min=-10, max=0)
         # var = torch.exp(log_var)
-        conf = outputs["uncertainty"][idx][:, None]
-        return conf
+        conf_rot = outputs["uncertainty_rot"][idx][:]
+        conf_t = outputs["uncertainty_t"][idx][:]
+        return {"rot": conf_rot, "t": conf_t}
 
 
 def error_to_confidence(err, min_err=1.0, max_err=30.0):
