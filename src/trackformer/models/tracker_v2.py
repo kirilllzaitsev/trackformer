@@ -7,6 +7,7 @@ import logging
 
 import numpy as np
 from pose_tracking.utils.detr_utils import postprocess_detr_outputs
+from pose_tracking.utils.pose import convert_r_t_to_rt
 import torch
 import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
@@ -71,7 +72,7 @@ class Tracker:
         return self.obj_detector.num_queries
 
     def reset(self, hard=True):
-        self.tracks = []
+        self.tracks: list[Track] = []
         self.inactive_tracks = []
         self._prev_features = deque([None], maxlen=self.prev_frame_dist)
 
@@ -341,20 +342,24 @@ class Tracker:
             boxes = result['boxes']
         else:
             boxes = clip_boxes_to_image(result['boxes'], orig_size[0])
+      
+        poses=convert_r_t_to_rt(result['rot'], result['t'])
 
         # TRACKS
         if num_prev_track:
             track_scores = result['scores'][:-self.num_object_queries]
             track_boxes = boxes[:-self.num_object_queries]
+            track_poses = poses[:-self.num_object_queries]
 
             if 'masks' in result:
                 track_masks = result['masks'][:-self.num_object_queries]
             if self.generate_attention_maps:
                 track_attention_maps = self.attention_data['maps'][:-self.num_object_queries]
 
+            # TODO: provide num_classes for filtering
             track_keep = torch.logical_and(
                 track_scores > self.track_obj_score_thresh,
-                result['labels'][:-self.num_object_queries] == 0)
+                result['labels'][:-self.num_object_queries] >= 0)
 
             tracks_to_inactive = []
             tracks_from_inactive = []
@@ -364,6 +369,7 @@ class Tracker:
                     track.score = track_scores[i]
                     track.hs_embed.append(hs_embeds[i])
                     track.pos = track_boxes[i]
+                    track.pose=track_poses[i]
                     track.count_termination = 0
 
                     if 'masks' in result:
@@ -377,7 +383,7 @@ class Tracker:
 
             track_keep = torch.logical_and(
                 track_scores > self.reid_score_thresh,
-                result['labels'][:-self.num_object_queries] == 0)
+                result['labels'][:-self.num_object_queries] >= 0)
 
             # reid queries
             for i, track in enumerate(self.inactive_tracks, start=len(self.tracks)):
@@ -385,6 +391,7 @@ class Tracker:
                     track.score = track_scores[i]
                     track.hs_embed.append(hs_embeds[i])
                     track.pos = track_boxes[i]
+                    track.pose=track_poses[i]
 
                     if 'masks' in result:
                         track.mask = track_masks[i]
@@ -442,7 +449,7 @@ class Tracker:
 
         new_det_keep = torch.logical_and(
             new_det_scores > self.detection_obj_score_thresh,
-            result['labels'][-self.num_object_queries:] == 0)
+            result['labels'][-self.num_object_queries:] >= 0)
 
         new_det_boxes = new_det_boxes[new_det_keep]
         new_det_scores = new_det_scores[new_det_keep]
