@@ -29,8 +29,12 @@ class PositionEmbeddingSine3D(nn.Module):
         self.scale = scale
 
     def forward(self, tensor_list: NestedTensor):
-        x = tensor_list.tensors
-        mask = tensor_list.mask
+        if isinstance(tensor_list, torch.Tensor):
+            x = tensor_list
+            mask = torch.zeros_like(x[:, 0, :, :], dtype=torch.bool)
+        else:
+            x = tensor_list.tensors
+            mask = tensor_list.mask
         n, h, w = mask.shape
         # assert n == 1
         # mask = mask.reshape(1, 1, h, w)
@@ -98,8 +102,12 @@ class PositionEmbeddingSine(nn.Module):
         self.scale = scale
 
     def forward(self, tensor_list: NestedTensor):
-        x = tensor_list.tensors
-        mask = tensor_list.mask
+        if isinstance(tensor_list, torch.Tensor):
+            x = tensor_list
+            mask = torch.zeros_like(x[:, 0, :, :], dtype=torch.bool)
+        else:
+            x = tensor_list.tensors
+            mask = tensor_list.mask
         assert mask is not None
         not_mask = ~mask
         y_embed = not_mask.cumsum(1, dtype=torch.float32)
@@ -135,7 +143,10 @@ class PositionEmbeddingLearned(nn.Module):
         nn.init.uniform_(self.col_embed.weight)
 
     def forward(self, tensor_list: NestedTensor):
-        x = tensor_list.tensors
+        if isinstance(tensor_list, torch.Tensor):
+            x = tensor_list
+        else:
+            x = tensor_list.tensors
         h, w = x.shape[-2:]
         i = torch.arange(w, device=x.device)
         j = torch.arange(h, device=x.device)

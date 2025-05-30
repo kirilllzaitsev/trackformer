@@ -537,39 +537,40 @@ class Tracker:
         # Generate Results #
         ####################
 
-        # if 'masks' in result and self.tracks:
-        #     track_mask_probs = torch.stack([track.mask for track in self.tracks])
-        #     index_map = torch.arange(track_mask_probs.size(0))[:, None, None]
-        #     index_map = index_map.expand_as(track_mask_probs)
+        if 'masks' in result and self.tracks:
+            track_mask_probs = torch.stack([track.mask for track in self.tracks])
+            index_map = torch.arange(track_mask_probs.size(0))[:, None, None]
+            index_map = index_map.expand_as(track_mask_probs)
 
-        #     track_masks = torch.logical_and(
-        #         # remove background
-        #         track_mask_probs > 0.5,
-        #         # remove overlapp by largest probablity
-        #         index_map == track_mask_probs.argmax(dim=0)
-        #     )
-        #     for i, track in enumerate(self.tracks):
-        #         track.mask = track_masks[i]
+            track_masks = torch.logical_and(
+                # remove background
+                track_mask_probs > 0.5,
+                # remove overlapp by largest probablity
+                index_map == track_mask_probs.argmax(dim=0)
+            )
+            for i, track in enumerate(self.tracks):
+                track.mask = track_masks[i]
 
-        # for track in self.tracks:
-        #     if track.id not in self.results:
-        #         self.results[track.id] = {}
+        for track in self.tracks:
+            if track.id not in self.results:
+                self.results[track.id] = {}
 
-        #     self.results[track.id][self.frame_index] = {}
+            self.results[track.id][self.frame_index] = {}
 
-        #     if self.obj_detector.overflow_boxes:
-        #         self.results[track.id][self.frame_index]['bbox'] = track.pos.cpu().numpy()
-        #     else:
-        #         self.results[track.id][self.frame_index]['bbox'] = clip_boxes_to_image(track.pos, orig_size[0]).cpu().numpy()
+            if self.obj_detector.overflow_boxes:
+                self.results[track.id][self.frame_index]['bbox'] = track.pos.cpu().numpy()
+            else:
+                self.results[track.id][self.frame_index]['bbox'] = clip_boxes_to_image(track.pos, orig_size[0]).cpu().numpy()
+            self.results[track.id][self.frame_index]['pose'] = (track.pose).cpu().numpy()
 
-        #     self.results[track.id][self.frame_index]['score'] = track.score.cpu().numpy()
-        #     self.results[track.id][self.frame_index]['obj_ind'] = track.obj_ind.cpu().item()
+            self.results[track.id][self.frame_index]['score'] = track.score.cpu().numpy()
+            self.results[track.id][self.frame_index]['obj_ind'] = track.obj_ind.cpu().item()
 
-        #     if track.mask is not None:
-        #         self.results[track.id][self.frame_index]['mask'] = track.mask.cpu().numpy()
-        #     if track.attention_map is not None:
-        #         self.results[track.id][self.frame_index]['attention_map'] = \
-        #             track.attention_map.cpu().numpy()
+            if track.mask is not None:
+                self.results[track.id][self.frame_index]['mask'] = track.mask.cpu().numpy()
+            if track.attention_map is not None:
+                self.results[track.id][self.frame_index]['attention_map'] = \
+                    track.attention_map.cpu().numpy()
 
         for t in self.inactive_tracks:
             t.count_inactive += 1
@@ -591,16 +592,19 @@ class Track(object):
     """This class contains all necessary for every individual track."""
 
     def __init__(self, pos, score, track_id, hs_embed, obj_ind,
-                 mask=None, attention_map=None, rot=None, t=None):
+                 mask=None, attention_map=None, rot=None, t=None, pose=None):
         self.id = track_id
         self.pos = pos
         self.last_pos = deque([pos.clone()])
         self.last_rot = deque()
         self.last_t = deque()
+        self.last_pose = deque()
         if rot is not None:
             self.last_rot.append(rot)
         if t is not None:
             self.last_t.append(t)
+        if pose is not None:
+            self.last_pose.append(pose)
         self.score = score
         self.ims = deque([])
         self.count_inactive = 0
@@ -610,8 +614,8 @@ class Track(object):
         self.mask = mask
         self.attention_map = attention_map
         self.obj_ind = obj_ind
-        self.rot = rot
-        self.t = t
+        assert pose is not None or (rot is not None and t is not None)
+        self.pose = convert_r_t_to_rt(rot, t) if pose is None else pose
 
     def has_positive_area(self) -> bool:
         """Checks if the current position of the track has
@@ -622,9 +626,6 @@ class Track(object):
         """Reset last_pos to the current position of the track."""
         self.last_pos.clear()
         self.last_pos.append(self.pos.clone())
-        if self.rot is not None:
-            self.last_rot.clear()
-            self.last_rot.append(self.rot.clone())
-        if self.t is not None:
-            self.last_t.clear()
-            self.last_t.append(self.t.clone())
+        if self.pose is not None:
+            self.last_pose.clear()
+            self.last_pose.append(self.pose.clone())

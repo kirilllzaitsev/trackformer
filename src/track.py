@@ -13,7 +13,7 @@ import yaml
 from torch.utils.data import DataLoader
 
 from trackformer.datasets.tracking import TrackDatasetFactory
-from trackformer.models import build_model
+from trackformer.models.build import build_model
 from trackformer.models.tracker import Tracker
 from trackformer.util.misc import nested_dict_to_namespace
 from trackformer.util.track_utils import (evaluate_mot_accums, get_mot_accum,
