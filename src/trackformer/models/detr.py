@@ -565,18 +565,26 @@ class SetCriterion(nn.Module):
 
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
         return losses
-    
+
     def extract_factors(self, outputs, targets, indices):
         idx = self._get_src_permutation_idx(indices)
         factors = {}
+        if "decoded" in outputs:
+            src_f_decoded = outputs["decoded"].cpu()[idx].cuda()
+            factors["decoded_factors"] = src_f_decoded
+        if "obs_tokens" in outputs:
+            src_f_obs_tokens = outputs["obs_tokens"].cpu()[idx].cuda()
+            factors["obs_tokens"] = src_f_obs_tokens
         for f in self.factors:
             src_f_logits = outputs["factors"][f].cpu()[idx].cuda()
-            target_fs = (
-                torch.cat(
-                    [t["factors"][f][i] for t, (_, i) in zip(targets, indices)], dim=0
-                )
-                .float()
-            )
+            target_fs = [
+                t["factors"][f][i]
+                for t, (_, i) in zip(targets, indices)
+                if not is_empty(i)
+            ]
+            if len(target_fs) == 0:
+                return {}  # applies to all other factors
+            target_fs = torch.cat(target_fs, dim=0).float()
             target_f_buckets = bucketize_soft_labels(target_fs, num_buckets=10)
             pred_probs = F.softmax(src_f_logits, dim=-1)
             factors[f] = {
