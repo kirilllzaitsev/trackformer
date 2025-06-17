@@ -819,12 +819,10 @@ class SetCriterion(nn.Module):
 
     def get_uncertainty_loss(self, outputs, targets, indices, eps=1e-3):
         # pick up other indices to ensure the loss encounters negatives (with proper matching for n objs)
-        indices_other = copy.deepcopy(indices)
         num_others = 0
         num_others = 1
-        num_others = 2
-        num_others = 3
-        if num_others > 0:
+        indices_other = copy.deepcopy(indices)
+        if num_others > 0 and outputs["pred_logits"].shape[1] > 1:
             for bidx in range(len(indices)):
                 other_query_idxs = [
                     random.choice(
@@ -845,24 +843,18 @@ class SetCriterion(nn.Module):
         conf_rt = self.get_uncertainty(outputs, idx_all)
         r_err_deg_all = self.calc_r_err_deg(outputs, targets, indices_other)
         t_err_cm_all = self.calc_t_err_cm(outputs, targets, indices_other)
-        r_err_ind = error_to_confidence(r_err_deg_all, min_err=1.0, max_err=30.0)
-        t_err_ind = error_to_confidence(t_err_cm_all, min_err=1.0, max_err=15.0)
+        r_conf_gt_all = error_to_confidence(r_err_deg_all, min_err=1.0, max_err=30.0)
+        t_conf_gt_all = error_to_confidence(t_err_cm_all, min_err=1.0, max_err=15.0)
         loss_uncertainty_rt = {}
         for k, conf_one in conf_rt.items():
-            prob_one = conf_one.sigmoid()
-            gt_confidence = r_err_ind if k == "rot" else t_err_ind
+            gt_confidence = r_conf_gt_all if k == "rot" else t_conf_gt_all
 
             targets_one = gt_confidence.float().clamp(min=eps, max=1 - eps)
             ce_loss = F.binary_cross_entropy_with_logits(
                 conf_one, targets_one, reduction="none"
             )
-            p_t = prob_one * targets_one + (1 - prob_one) * (1 - targets_one)
-            loss_uncertainty = ce_loss * ((1 - p_t) ** self.focal_gamma)
-            if self.focal_alpha_confidence >= 0:
-                alpha_t = self.focal_alpha_confidence * targets_one + (
-                    1 - self.focal_alpha_confidence
-                ) * (1 - targets_one)
-                loss_uncertainty = alpha_t * loss_uncertainty
+            prob_one = conf_one.sigmoid()
+            loss_uncertainty = ce_loss
             loss_uncertainty_rt[k] = loss_uncertainty.mean()
 
         r_err_deg = self.calc_r_err_deg(outputs, targets, indices)
@@ -958,7 +950,7 @@ class PostProcess(nn.Module):
         return results
 
 
-class MLP(nn.Module):
+class MLPv1(nn.Module):
     """ Very simple multi-layer perceptron (also called FFN)"""
 
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers, dropout=0.0):
