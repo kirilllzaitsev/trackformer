@@ -5,13 +5,15 @@ DETR model and criterion classes.
 import copy
 import random
 
+from pose_tracking.models.cnnlstm import MLP
+from pose_tracking.models.detr import PoseConfidenceTransformer
 import torch
 import torch.nn.functional as F
 from pose_tracking.losses import geodesic_loss_mat
 from pose_tracking.metrics import calc_r_error, calc_t_error
 from pose_tracking.utils.geom import convert_2d_t_to_3d
 from pose_tracking.utils.kpt_utils import load_extractor
-from pose_tracking.utils.misc import init_params, print_cls
+from pose_tracking.utils.misc import init_params, is_empty, print_cls
 from pose_tracking.utils.pose import convert_rot_vector_to_matrix
 from torch import nn
 
@@ -53,6 +55,11 @@ class DETR(nn.Module):
         head_hidden_dim=None,
         r_num_layers_inc=0,
         uncertainty_coef=0.1,
+        factors=None,
+        roi_feature_dim=256,
+        use_render_token=False,
+        use_uncertainty=False,
+        use_pose_tokens=False,
     ):
         """Initializes the model.
         Parameters:
@@ -72,6 +79,9 @@ class DETR(nn.Module):
         self.use_kpts_as_ref_pt = use_kpts_as_ref_pt
         self.use_kpts_as_img = use_kpts_as_img
         self.use_pose = use_pose
+        self.use_uncertainty = use_uncertainty
+        self.use_pose_tokens = use_pose_tokens
+        self.use_render_token = use_render_token
         self.rot_out_dim = rot_out_dim
         self.t_out_dim = t_out_dim
         self.dropout = dropout
@@ -79,6 +89,8 @@ class DETR(nn.Module):
         self.head_num_layers = head_num_layers
         self.r_num_layers_inc = r_num_layers_inc
         self.uncertainty_coef = uncertainty_coef
+        self.factors = factors
+        self.roi_feature_dim = roi_feature_dim
 
         self.do_predict_2d_t = t_out_dim == 2
         self.head_hidden_dim = head_hidden_dim or transformer.d_model
@@ -88,7 +100,7 @@ class DETR(nn.Module):
         self.overflow_boxes = overflow_boxes
         self.class_embed = nn.Linear(self.hidden_dim, num_classes + 1)
         self.query_embed = nn.Embedding(num_queries, self.hidden_dim)
-        self.bbox_embed = MLP(self.hidden_dim, self.hidden_dim, output_dim=4, num_layers=head_num_layers, dropout=dropout_heads)
+        self.bbox_embed = MLP(in_dim=self.hidden_dim, hidden_dim=self.hidden_dim, out_dim=4, num_layers=head_num_layers, dropout=dropout_heads, do_return_last_latent=use_uncertainty)
         if not use_boxes:
             for p in self.bbox_embed.parameters():
                 p.requires_grad = False
@@ -100,19 +112,31 @@ class DETR(nn.Module):
                     p.requires_grad = False
 
         if use_pose:
-            self.rot_embed = MLP(self.hidden_dim, self.head_hidden_dim, rot_out_dim, num_layers=head_num_layers+r_num_layers_inc, dropout=dropout_heads)
-            self.t_embed = MLP(self.hidden_dim, self.head_hidden_dim, t_out_dim, num_layers=head_num_layers, dropout=dropout_heads)
+            self.rot_embed = MLP(in_dim=self.hidden_dim, hidden_dim=self.head_hidden_dim, out_dim=rot_out_dim, num_layers=head_num_layers+r_num_layers_inc, dropout=dropout_heads, do_return_last_latent=use_uncertainty)
+            self.t_embed = MLP(in_dim=self.hidden_dim, hidden_dim=self.head_hidden_dim, out_dim=t_out_dim, num_layers=head_num_layers, dropout=dropout_heads, do_return_last_latent=use_uncertainty)
         if self.do_predict_2d_t:
             self.depth_embed = MLP(
-                input_dim=self.hidden_dim,
-                output_dim=1,
+                in_dim=self.hidden_dim,
+                out_dim=1,
                 hidden_dim=self.head_hidden_dim,
                 num_layers=head_num_layers,
                 dropout=dropout_heads,
+                do_return_last_latent=use_uncertainty
             )
             # use bbox 2d for t
             for p in self.t_embed.parameters():
                 p.requires_grad = False
+        if use_uncertainty:
+            self.coformer = PoseConfidenceTransformer(
+                n_queries=self.num_queries,
+                d_model=self.transformer.d_model,
+                n_heads=self.transformer.nhead,
+                n_layers=self.transformer.num_decoder_layers,
+                dropout=dropout,
+                roi_feature_dim=roi_feature_dim,
+                factors=factors,
+                use_render_token=use_render_token,
+            )
 
         init_params(self, included_names=['rot_embed', 't_embed', 'depth_embed'])
 
