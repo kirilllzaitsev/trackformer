@@ -865,6 +865,10 @@ class SetCriterion(nn.Module):
                 loss_uncertainty = alpha_t * loss_uncertainty
             loss_uncertainty_rt[k] = loss_uncertainty.mean()
 
+        r_err_deg = self.calc_r_err_deg(outputs, targets, indices)
+        t_err_cm = self.calc_t_err_cm(outputs, targets, indices)
+        r_conf_gt = error_to_confidence(r_err_deg, min_err=1.0, max_err=30.0)
+        t_conf_gt = error_to_confidence(t_err_cm, min_err=1.0, max_err=15.0)
         idx = self._get_src_permutation_idx(indices)
         conf_rt_matched = self.get_uncertainty(outputs, idx)
         prob_rt_matched = {
@@ -881,6 +885,10 @@ class SetCriterion(nn.Module):
             "loss_uncertainty_t": loss_uncertainty_rt["t"],
             "confidence_rot": conf_r_matched.mean(),
             "confidence_t": conf_t_matched.mean(),
+            "confidence_gt_rot": r_conf_gt.mean(),
+            "confidence_gt_t": t_conf_gt.mean(),
+            "r_err_deg": r_err_deg.mean(),
+            "t_err_cm": t_err_cm.mean(),
         }
 
     def get_uncertainty(self, outputs, idx):
