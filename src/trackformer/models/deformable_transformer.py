@@ -38,6 +38,7 @@ class DeformableTransformer(nn.Module):
         self.use_kpts = use_kpts
         self.use_kpts_as_ref_pt = use_kpts_as_ref_pt
         self.use_kpts_as_img = use_kpts_as_img
+        self.num_decoder_layers = num_decoder_layers
 
         if use_kpts_as_img:
             self.descriptor_proj = MLP(in_dim=256, out_dim=d_model, hidden_dim=256, num_layers=2)

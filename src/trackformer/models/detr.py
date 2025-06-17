@@ -328,14 +328,14 @@ class SetCriterion(nn.Module):
             track_query_false_positive_eos_weight
         )
         self.t_out_dim = t_out_dim
-        self.factors=factors
+        self.factors=[] if factors is None else factors
 
         self.use_rel_pose = use_rel_pose
         self.use_pose_refinement = use_pose_refinement
         self.use_uncertainty = use_uncertainty
 
         self.use_factors = factors is not None
-        self.focal_alpha_confidence = 0.5
+        self.focal_alpha_confidence = 0.25
 
         if self.use_factors:
             self.losses.append("factors")
@@ -793,7 +793,7 @@ class SetCriterion(nn.Module):
                     )
                     l_dict = {k + f"_{i}": v for k, v in l_dict.items()}
                     losses.update(l_dict)
-                if self.use_uncertainty:
+                if self.use_uncertainty and any('uncertainty' in x for x in aux_outputs.keys()):
                     get_uncertainty_loss_res = self.get_uncertainty_loss(aux_outputs, targets=targets, indices=indices)
                     losses.update({f"{k}_{i}":v for k,v in get_uncertainty_loss_res.items()})
 

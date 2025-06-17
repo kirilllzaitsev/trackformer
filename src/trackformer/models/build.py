@@ -64,6 +64,14 @@ def build_model(args, num_classes=None):
         'use_kpts_as_img': use_kpts_as_img,
         'r_num_layers_inc': r_num_layers_inc,
         'overflow_boxes': args.overflow_boxes}
+    for k in [
+        "factors",
+        "roi_feature_dim",
+        "use_render_token",
+        "use_uncertainty",
+    ]:
+        if hasattr(args, k):
+            detr_kwargs[k] = getattr(args, k)
 
     tracking_kwargs = {
         'track_query_false_positive_prob': args.track_query_false_positive_prob,
