@@ -858,13 +858,12 @@ class SetCriterion(nn.Module):
 
         return losses
 
-    def get_uncertainty_loss(self, outputs, targets, indices, eps=1e-3):
+    def get_uncertainty_loss(self, outputs, targets, indices, eps=0):
         # pick up other indices to ensure the loss encounters negatives (with proper matching for n objs)
-        num_others = 0
-        num_others = 1
         indices_other = copy.deepcopy(indices)
-        if num_others > 0 and outputs["pred_logits"].shape[1] > 1:
+        if outputs["pred_logits"].shape[1] > 1:
             for bidx in range(len(indices)):
+                num_others = max(len(indices_other[bidx][0]) // 3, 1)
                 other_query_idxs = [
                     random.choice(
                         [
@@ -878,7 +877,10 @@ class SetCriterion(nn.Module):
                 indices_other_bidx_pred = torch.cat(
                     [indices_other[bidx][0], torch.tensor(other_query_idxs)]
                 )
-                indices_other_bidx_gt = indices[bidx][1].repeat(num_others + 1)
+                # pick at random
+                indices_other_bidx_gt = torch.cat(
+                    [indices_other[bidx][1], indices_other[bidx][1][torch.randint(0, len(indices_other[bidx][1]), (num_others,))]]
+                )  # 0 for no object
                 indices_other[bidx] = (indices_other_bidx_pred, indices_other_bidx_gt)
         idx_all = self._get_src_permutation_idx(indices_other)
         conf_rt = self.get_uncertainty(outputs, idx_all)
