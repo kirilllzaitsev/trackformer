@@ -231,7 +231,7 @@ class DETRTrackingBase(nn.Module):
         #     target['track_queries_placeholder_mask'] = torch.zeros_like(target['track_queries_mask']).bool()
         #     target['track_queries_placeholder_mask'][:num_add] = True
 
-    def forward(self, samples: NestedTensor, targets: list = None, prev_features=None):
+    def forward(self, samples: NestedTensor, targets: list = None, prev_features=None, coformer_kwargs=None):
         if targets is not None and not self._tracking:
             prev_targets = [target['prev_target'] for target in targets]
 
@@ -250,7 +250,7 @@ class DETRTrackingBase(nn.Module):
                         prev_prev_targets = [target['prev_prev_target'] for target in targets]
 
                         # PREV PREV
-                        prev_prev_out, _, prev_prev_features, _, _ = super().forward([t['prev_prev_image'] for t in targets])
+                        prev_prev_out, _, prev_prev_features, _, _ = super().forward([t['prev_prev_image'] for t in targets], coformer_kwargs=coformer_kwargs)
 
                         prev_prev_outputs_without_aux = {
                             k: v for k, v in prev_prev_out.items() if 'aux_outputs' not in k}
@@ -263,9 +263,9 @@ class DETRTrackingBase(nn.Module):
                         prev_out, _, prev_features, _, _ = super().forward(
                             [t['prev_image'] for t in targets],
                             prev_targets,
-                            prev_prev_features)
+                            prev_prev_features, coformer_kwargs=coformer_kwargs)
                     else:
-                        prev_out, _, prev_features, _, _ = super().forward([t['prev_image'] for t in targets])
+                        prev_out, _, prev_features, _, _ = super().forward([t['prev_image'] for t in targets], coformer_kwargs=coformer_kwargs)
 
                     # prev_out = {k: v.detach() for k, v in prev_out.items() if torch.is_tensor(v)}
 
@@ -299,7 +299,7 @@ class DETRTrackingBase(nn.Module):
                     target['track_query_boxes'] = torch.zeros(0, 4).to(device)
                     target['track_query_match_ids'] = torch.tensor([]).long().to(device)
 
-        out, targets, features, memory, hs  = super().forward(samples, targets, prev_features)
+        out, targets, features, memory, hs  = super().forward(samples, targets, prev_features, coformer_kwargs=coformer_kwargs)
 
         return out, targets, features, memory, hs
 

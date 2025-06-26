@@ -69,6 +69,9 @@ def build_model(args, num_classes=None):
         "roi_feature_dim",
         "use_render_token",
         "use_uncertainty",
+        "n_layers_f_transformer",
+        "use_nocs",
+        "use_nocs_pred",
     ]:
         if hasattr(args, k):
             detr_kwargs[k] = getattr(args, k)
@@ -145,7 +148,9 @@ def build_criterion(args, num_classes, matcher, device, use_rel_pose=False):
                    'loss_uncertainty': getattr(args, "uncertainty_loss_coef", 1),
                    "loss_rot": getattr(args, "rot_loss_coef", 1),
                    "loss_depth": getattr(args, "depth_loss_coef", 1),
-                   "loss_t": getattr(args, "t_loss_coef", 1)}
+                   "loss_t": getattr(args, "t_loss_coef", 1),
+                   "loss_nocs": getattr(args, "nocs_loss_coef", 1),
+                   }
                    
     losses = [
         "labels",
@@ -190,6 +195,7 @@ def build_criterion(args, num_classes, matcher, device, use_rel_pose=False):
         factors=args.factors,
         uncertainty_coef=args.uncertainty_coef,
         use_uncertainty=args.use_uncertainty,
+        use_nocs=args.use_nocs,
     )
     criterion.to(device)
     return criterion
