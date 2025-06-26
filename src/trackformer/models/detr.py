@@ -737,11 +737,13 @@ class SetCriterion(nn.Module):
                 [t["intrinsics"] for t, (_, _) in zip(targets, indices)]
             )
             hw = torch.stack([t["size"] for t, (_, _) in zip(targets, indices)])
+            assert torch.all(hw == hw[0]), hw
+            assert torch.all(intrinsics == intrinsics[0]), intrinsics
             convert_2d_t_pred_to_3d_res = convert_2d_t_to_3d(
-                src_ts, src_depths, intrinsics, hw=hw
+                src_ts, src_depths, intrinsics[0], hw=hw[0]
             )
             src_ts_3d = convert_2d_t_pred_to_3d_res["t_pred"]
-            target_ts_3d = torch.cat([t["t"] for t, (_, _) in zip(targets, indices)])
+            target_ts_3d = torch.cat([t["t"][i] for t, (_, i) in zip(targets, indices)])
         else:
             src_ts_3d = src_ts
             target_ts_3d = target_ts
