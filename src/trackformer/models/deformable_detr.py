@@ -43,6 +43,9 @@ class DeformableDETR(DETR):
                 use_render_token=False,
                 use_uncertainty=False,
                 use_pose_tokens=False,
+                n_layers_f_transformer=1,
+                use_nocs=False,
+                use_nocs_pred=False,
                 ):
         """ Initializes the model.
         Parameters:
@@ -65,6 +68,9 @@ class DeformableDETR(DETR):
                         use_render_token=use_render_token,
                         use_uncertainty=use_uncertainty,
                         use_pose_tokens=use_pose_tokens,
+                        n_layers_f_transformer=n_layers_f_transformer,
+                        use_nocs=use_nocs,
+                        use_nocs_pred=use_nocs_pred,
 )
 
         self.merge_frame_features = merge_frame_features
@@ -152,7 +158,7 @@ class DeformableDETR(DETR):
     #     num_backbone_outs = len(self.backbone.strides)
     #     return [self.hidden_dim, ] * num_backbone_outs
 
-    def forward(self, samples: NestedTensor, targets: list = None, prev_features=None, pose_renderer_fn=None):
+    def forward(self, samples: NestedTensor, targets: list = None, prev_features=None, pose_renderer_fn=None, coformer_kwargs=None):
         """ The forward expects a NestedTensor, which consists of:
                - samples.tensors: batched images, of shape [batch_size x 3 x H x W]
                - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
@@ -323,9 +329,9 @@ class DeformableDETR(DETR):
                 if self.do_predict_2d_t:
                     if self.use_uncertainty:
                         outputs_depth, last_latent_depth = self.depth_embed(hs[lvl])
+                        last_latent_t = last_latent_bbox
                     else:
                         outputs_depth = self.depth_embed(hs[lvl])
-                    last_latent_t = last_latent_bbox
                     outputs_depths.append(outputs_depth)
                     # outputs_t = F.sigmoid(outputs_t)
                     outputs_t = outputs_coord[..., :2]
@@ -344,7 +350,8 @@ class DeformableDETR(DETR):
                         layer_idx=lvl,
                         pose_token=None if self.use_pose_tokens else None,
                         pose_renderer_fn=pose_renderer_fn,
-                        out_rt={"t": outputs_t, "rot": outputs_rot} if self.coformer.use_render_token else None,
+                        out_rt={"t": outputs_t, "rot": outputs_rot},
+                        coformer_kwargs=coformer_kwargs,
                     )
                     outs_fdetr.append(out_fdetr)
         outputs_class = torch.stack(outputs_classes)

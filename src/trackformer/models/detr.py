@@ -5,12 +5,12 @@ DETR model and criterion classes.
 import copy
 import random
 
-from pose_tracking.models.cnnlstm import MLP
-from pose_tracking.models.detr import PoseConfidenceTransformer
 import torch
 import torch.nn.functional as F
 from pose_tracking.losses import geodesic_loss_mat
 from pose_tracking.metrics import calc_r_error, calc_t_error
+from pose_tracking.models.cnnlstm import MLP
+from pose_tracking.models.detr import PoseConfidenceTransformer
 from pose_tracking.utils.geom import convert_2d_t_to_3d
 from pose_tracking.utils.kpt_utils import load_extractor
 from pose_tracking.utils.misc import init_params, is_empty, print_cls
@@ -60,6 +60,9 @@ class DETR(nn.Module):
         use_render_token=False,
         use_uncertainty=False,
         use_pose_tokens=False,
+        n_layers_f_transformer=1,
+        use_nocs=False,
+        use_nocs_pred=False,
     ):
         """Initializes the model.
         Parameters:
@@ -82,6 +85,8 @@ class DETR(nn.Module):
         self.use_uncertainty = use_uncertainty
         self.use_pose_tokens = use_pose_tokens
         self.use_render_token = use_render_token
+        self.use_nocs = use_nocs
+        self.use_nocs_pred = use_nocs_pred
         self.rot_out_dim = rot_out_dim
         self.t_out_dim = t_out_dim
         self.dropout = dropout
@@ -91,6 +96,7 @@ class DETR(nn.Module):
         self.uncertainty_coef = uncertainty_coef
         self.factors = factors
         self.roi_feature_dim = roi_feature_dim
+        self.n_layers_f_transformer = n_layers_f_transformer
 
         self.do_predict_2d_t = t_out_dim == 2
         self.head_hidden_dim = head_hidden_dim or transformer.d_model
@@ -136,6 +142,9 @@ class DETR(nn.Module):
                 roi_feature_dim=roi_feature_dim,
                 factors=factors,
                 use_render_token=use_render_token,
+                n_layers_f_transformer=n_layers_f_transformer,
+                use_nocs=use_nocs,
+                use_nocs_pred=use_nocs_pred,
             )
 
         init_params(self, included_names=['rot_embed', 't_embed', 'depth_embed'])
