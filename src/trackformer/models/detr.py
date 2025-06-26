@@ -300,6 +300,7 @@ class SetCriterion(nn.Module):
         factors=None,
         uncertainty_coef=0.1,
         use_uncertainty=False,
+        use_nocs=False,
     ):
         """Create the criterion.
         Parameters:
@@ -335,10 +336,13 @@ class SetCriterion(nn.Module):
         self.use_uncertainty = use_uncertainty
 
         self.use_factors = factors is not None
+        self.use_nocs = use_nocs
         self.focal_alpha_confidence = 0.25
 
         if self.use_factors:
             self.losses.append("factors")
+        if self.use_nocs:
+            self.losses.append("nocs")
 
         if self.t_out_dim == 2:
             self.tgt_key_t = "xy"
@@ -683,6 +687,39 @@ class SetCriterion(nn.Module):
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
         return losses
 
+    def loss_nocs(self, outputs, targets, indices, num_boxes):
+        """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
+        targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+        The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
+        """
+        if "nocs_pred" not in outputs:
+            return {}
+        indices = self.filter_out_idxs_for_rel_pose(targets, indices)
+
+        idx = self._get_src_permutation_idx(indices)
+
+        src_nocs = outputs["nocs_pred"][idx]
+        target_nocs = [
+            t["nocs_crop"][i]
+            for t, (_, i) in zip(targets, indices)
+            if len(t["nocs_crop"]) > 0
+        ]
+        target_nocs_mask = [
+            t["nocs_crop_mask"][i]
+            for t, (_, i) in zip(targets, indices)
+            if len(t["nocs_crop_mask"]) > 0
+        ]
+        if len(target_nocs) == 0:
+            return {}
+        target_nocs = torch.cat(target_nocs, dim=0)
+        target_nocs_mask = torch.cat(target_nocs_mask, dim=0).bool()
+        losses = {}
+        mask = target_nocs_mask[:, None].expand_as(src_nocs)
+        loss_nocs = 0.2 * F.l1_loss(src_nocs[mask], target_nocs[mask])
+
+        losses["loss_nocs"] = loss_nocs
+        return losses
+
     def calc_t_err_cm(self, outputs, targets, indices):
         idx = self._get_src_permutation_idx(indices)
         src_ts = outputs["t"][idx]
@@ -737,6 +774,10 @@ class SetCriterion(nn.Module):
         if self.use_factors:
             loss_map.update({
                 'factors': self.loss_factors,
+            })
+        if self.use_nocs:
+            loss_map.update({
+                'nocs': self.loss_nocs,
             })
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
         return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
