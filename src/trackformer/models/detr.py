@@ -551,36 +551,30 @@ class SetCriterion(nn.Module):
         targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
         The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
         """
-        idx = self._get_src_permutation_idx(indices)
         losses = {}
-        for f in self.factors:
-            src_f_logits = outputs["factors"][f].cpu()[idx].cuda()
-            target_fs = (
-                torch.cat(
-                    [t["factors"][f][i] for t, (_, i) in zip(targets, indices)], dim=0
-                )
-                .float()
-            )
-            target_f_buckets = bucketize_soft_labels(target_fs, num_buckets=10)
-            loss_f = F.cross_entropy(
-                src_f_logits, target_f_buckets, reduction="none"
+        fetch_res = self.extract_factors(outputs, targets, indices, do_fetch_all=False)
+        for f, res in fetch_res.items():
+            pred_fs = res["pred_probs"]
+            target_fs = res["target"]
+            loss_f = F.smooth_l1_loss(
+                pred_fs, target_fs, reduction="none", beta=0.1
             )
             losses[f"loss_factors_{f}"] = loss_f
 
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
         return losses
 
-    def extract_factors(self, outputs, targets, indices):
+    def extract_factors(self, outputs, targets, indices, do_fetch_all=True):
         idx = self._get_src_permutation_idx(indices)
         factors = {}
-        if "decoded" in outputs:
-            src_f_decoded = outputs["decoded"].cpu()[idx].cuda()
+        if "decoded" in outputs and do_fetch_all:
+            src_f_decoded = outputs["decoded"][idx]
             factors["decoded_factors"] = src_f_decoded
-        if "obs_tokens" in outputs:
-            src_f_obs_tokens = outputs["obs_tokens"].cpu()[idx].cuda()
+        if "obs_tokens" in outputs and do_fetch_all:
+            src_f_obs_tokens = outputs["obs_tokens"][idx]
             factors["obs_tokens"] = src_f_obs_tokens
         for f in self.factors:
-            src_f_logits = outputs["factors"][f].cpu()[idx].cuda()
+            src_f_logits = outputs["factors"][f][idx].squeeze(-1)
             target_fs = [
                 t["factors"][f][i]
                 for t, (_, i) in zip(targets, indices)
@@ -589,12 +583,8 @@ class SetCriterion(nn.Module):
             if len(target_fs) == 0:
                 return {}  # applies to all other factors
             target_fs = torch.cat(target_fs, dim=0).float()
-            target_f_buckets = bucketize_soft_labels(target_fs, num_buckets=10)
-            pred_probs = F.softmax(src_f_logits, dim=-1)
             factors[f] = {
-                "pred_probs": pred_probs,
-                "pred_buckets": pred_probs.argmax(-1),
-                "target_buckets": target_f_buckets,
+                "pred_probs": src_f_logits.sigmoid(),
                 "target": target_fs,
             }
 
