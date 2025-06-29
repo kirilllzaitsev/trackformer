@@ -321,9 +321,6 @@ class SetCriterion(nn.Module):
             losses: list of all the losses to be applied. See get_loss for list of
                     available losses.
         """
-        use_err_proj=False
-        use_err_proj=True
-
         super().__init__()
         self.num_classes = num_classes
         self.matcher = matcher
@@ -350,19 +347,14 @@ class SetCriterion(nn.Module):
         self.use_factors = factors is not None
         self.use_nocs = use_nocs
         self.use_kpts = use_kpts
-        self.use_err_proj = use_err_proj
         self.focal_alpha_confidence = 0.25
 
         if self.use_factors:
             self.losses.append("factors")
         if self.use_nocs:
             self.losses.append("nocs")
-        if use_err_proj:
-            self.rt_err_proj_dim=32
-            self.rot_delta_to_err_mlp = MLP(in_dim=6, out_dim=self.rt_err_proj_dim, hidden_dim=32, num_layers=3)
-            self.t_delta_to_err_mlp = MLP(in_dim=3, out_dim=self.rt_err_proj_dim, hidden_dim=32, num_layers=3)
-            self.rot_err_mlp = MLP(in_dim=self.rt_err_proj_dim, out_dim=1, hidden_dim=32, num_layers=3)
-            self.t_err_mlp = MLP(in_dim=self.rt_err_proj_dim, out_dim=1, hidden_dim=32, num_layers=3)
+        if self.use_kpts:
+            self.losses.append("kpts")
 
         if self.t_out_dim == 2:
             self.tgt_key_t = "xy"
@@ -870,7 +862,7 @@ class SetCriterion(nn.Module):
 
         return losses
 
-    def get_uncertainty_loss_v1(self, outputs, targets, indices, eps=0):
+    def get_uncertainty_loss(self, outputs, targets, indices, eps=0):
         # pick up other indices to ensure the loss encounters negatives (with proper matching for n objs)
         indices_other = copy.deepcopy(indices)
         if outputs["pred_logits"].shape[1] > 1:
@@ -937,68 +929,6 @@ class SetCriterion(nn.Module):
             "r_err_deg": r_err_deg.mean(),
             "t_err_cm": t_err_cm.mean(),
         }
-    
-    def get_uncertainty_loss(self, outputs, targets, indices):
-        assert self.use_err_proj
-        idx = self._get_src_permutation_idx(indices)
-        src_rots = outputs["rot"][idx]
-        src_rot_delta_projs = outputs["uncertainty_rot"][idx]
-        target_rots = [
-            t[self.tgt_key_rot][i]
-            for t, (_, i) in zip(targets, indices)
-            if len(t[self.tgt_key_rot]) > 0
-        ]
-        src_ts = outputs["t"][idx]
-        src_t_delta_projs = outputs["uncertainty_t"][idx]
-        target_ts = [
-            t[self.tgt_key_t][i]
-            for t, (_, i) in zip(targets, indices)
-            if len(t[self.tgt_key_t]) > 0
-        ]
-        if len(target_rots) == 0:
-            return torch.zeros(src_rots.shape[0], device=src_rots.device)
-        target_rots = torch.cat(target_rots, dim=0)
-        target_ts = torch.cat(target_ts, dim=0)
-
-        r_delta = (src_rots - target_rots).abs()
-        r_delta_proj = self.rot_delta_to_err_mlp(r_delta)
-        r_err_deg_pred = self.rot_err_mlp(r_delta_proj).squeeze(-1)
-        t_delta = (src_ts - target_ts).abs()
-        t_delta_proj = self.t_delta_to_err_mlp(t_delta)
-        t_err_cm_pred = self.t_err_mlp(t_delta_proj).squeeze(-1)
-        
-        target_rot_mats = convert_rot_vector_to_matrix(target_rots)
-        src_rot_mats = convert_rot_vector_to_matrix(src_rots).detach()
-        r_err_deg = geodesic_loss_mat(
-            src_rot_mats,
-            target_rot_mats,
-            sym_type="",
-            do_return_deg=True,
-            do_reduce=False,
-        )
-        t_err_cm = calc_t_error(src_ts.detach(), target_ts, do_reduce=False) * 1e2
-        
-        loss_rot_err=F.smooth_l1_loss(r_err_deg_pred, r_err_deg)*0.1
-        loss_t_err=F.smooth_l1_loss(t_err_cm_pred, t_err_cm)*0.1
-        loss_rot_delta_proj=F.smooth_l1_loss(src_rot_delta_projs, r_delta_proj)
-        loss_t_delta_proj=F.smooth_l1_loss(src_t_delta_projs, t_delta_proj)
-        
-        losses = {
-            "loss_rot_err": loss_rot_err,
-            "loss_t_err": loss_t_err,
-            "loss_rot_delta_proj": loss_rot_delta_proj,
-            "loss_t_delta_proj": loss_t_delta_proj,
-            "loss_uncertainty": (0.25 * (loss_rot_err + loss_t_err + loss_rot_delta_proj + loss_t_delta_proj)),
-            "confidence_rot": r_err_deg_pred.mean(),
-            "confidence_t": t_err_cm_pred.mean(),
-            "confidence": 0.5 * (r_err_deg_pred.mean() + t_err_cm_pred.mean()),
-            "r_err_deg": r_err_deg_pred.mean(),
-            "t_err_cm": t_err_cm_pred.mean(),
-            "r_err_deg_gt": r_err_deg.mean(),
-            "t_err_cm_gt": t_err_cm.mean(),
-        }
-
-        return losses
 
     def get_uncertainty(self, outputs, idx):
         # log_var = outputs["uncertainty"][idx][:, None].clamp(min=-10, max=0)
