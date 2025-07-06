@@ -716,11 +716,37 @@ class SetCriterion(nn.Module):
         target_nocs = torch.cat(target_nocs, dim=0)
         target_nocs_mask = torch.cat(target_nocs_mask, dim=0).bool()
         losses = {}
-        mask = target_nocs_mask[:, None]
-        loss_nocs = 1 * F.l1_loss(src_nocs*mask, target_nocs*mask, reduction='sum') / max(1, mask.sum().item())
+        mask = target_nocs_mask[:, None].expand_as(src_nocs)
+        loss_nocs = 0.2 * F.l1_loss(src_nocs[mask], target_nocs[mask])
+
+        if self.use_nocs_pose_pred:
+            nocs_rt_losses = self.get_nocs_rt_losses(
+                outputs, targets, indices, num_boxes
+            )
+            losses.update(nocs_rt_losses)
+            loss_nocs += 0.1 * sum(v for v in nocs_rt_losses.values())
 
         losses["loss_nocs"] = loss_nocs
         return losses
+
+    def get_nocs_rt_losses(self, outputs, targets, indices, num_boxes):
+        assert self.t_out_dim == 3, "not implemented"
+        nocs_rt_losses = {}
+        for rt_key in ["rot", "t"]:
+            for nocs_type in ["pred"]:
+                func = self.loss_t if rt_key == "t" else self.loss_rot
+                losses_t = func(
+                    outputs,
+                    targets,
+                    indices,
+                    num_boxes,
+                    output_key=f"nocs_{nocs_type}_{rt_key}",
+                )
+                nocs_rt_losses.update(
+                    {f"loss_{rt_key}_nocs_{nocs_type}": v for k, v in losses_t.items()}
+                )
+
+        return nocs_rt_losses
 
     def calc_t_err_cm(self, outputs, targets, indices):
         idx = self._get_src_permutation_idx(indices)
