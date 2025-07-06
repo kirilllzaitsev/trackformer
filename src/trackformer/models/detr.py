@@ -722,8 +722,8 @@ class SetCriterion(nn.Module):
         target_nocs = torch.cat(target_nocs, dim=0)
         target_nocs_mask = torch.cat(target_nocs_mask, dim=0).bool()
         losses = {}
-        mask = target_nocs_mask[:, None].expand_as(src_nocs)
-        loss_nocs = 0.2 * F.l1_loss(src_nocs[mask], target_nocs[mask])
+        mask = target_nocs_mask[:, None]
+        loss_nocs = 1 * F.l1_loss(src_nocs*mask, target_nocs*mask, reduction='sum') / max(1, mask.sum().item())
 
         if self.use_nocs_pose_pred:
             nocs_rt_losses = self.get_nocs_rt_losses(
