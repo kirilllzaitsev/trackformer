@@ -585,12 +585,17 @@ class SetCriterion(nn.Module):
     def extract_factors(self, outputs, targets, indices, do_fetch_all=True):
         idx = self._get_src_permutation_idx(indices)
         factors = {}
-        if "decoded" in outputs and do_fetch_all:
-            src_f_decoded = outputs["decoded"][idx]
-            factors["decoded_factors"] = src_f_decoded
-        if "obs_tokens" in outputs and do_fetch_all:
-            src_f_obs_tokens = outputs["obs_tokens"][idx]
-            factors["obs_tokens"] = src_f_obs_tokens
+        if do_fetch_all:
+            for k in ["decoded", "obs_tokens", "nocs_pred", "nocs_crop", "nocs_crop_gt", "nocs_crop_mask_gt", "kpts"]:
+                if k in outputs:
+                    factors[k] = outputs[k][idx]
+            if self.use_nocs_pose_pred:
+                factors["nocs_pred_rot"] = outputs["nocs_pred_rot"][idx]
+                factors["nocs_pred_t"] = outputs["nocs_pred_t"][idx]
+                factors.update({
+                    "nocs_pred_r_err": self.calc_r_err_deg(outputs, targets, indices, output_key="nocs_pred_rot").item(),
+                    "nocs_pred_t_err": self.calc_t_err_cm(outputs, targets, indices, output_key="nocs_pred_t").item()*1e-2,
+                })
         for f in self.factors:
             src_f_logits = outputs["factors"][f][idx].squeeze(-1)
             target_fs = [
@@ -608,7 +613,7 @@ class SetCriterion(nn.Module):
 
         return factors
 
-    def loss_rot(self, outputs, targets, indices, num_boxes):
+    def loss_rot(self, outputs, targets, indices, num_boxes, output_key="rot"):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
         targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
         The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
@@ -617,7 +622,7 @@ class SetCriterion(nn.Module):
 
         idx = self._get_src_permutation_idx(indices)
 
-        src_rots = outputs["rot"][idx]
+        src_rots = outputs[output_key][idx]
         target_rots = (
             [t[self.tgt_key_rot][i] for t, (_, i) in zip(targets, indices) if len(t[self.tgt_key_rot])>0]
         )
@@ -665,14 +670,14 @@ class SetCriterion(nn.Module):
                 indices[bidx] = (indices_b[0][idx_mask], indices_b[1][idx_mask])
         return indices
 
-    def loss_t(self, outputs, targets, indices, num_boxes):
+    def loss_t(self, outputs, targets, indices, num_boxes, output_key="t"):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
         targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
         The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
         """
         indices = self.filter_out_idxs_for_rel_pose(targets, indices)
         idx = self._get_src_permutation_idx(indices)
-        src_ts = outputs["t"][idx]
+        src_ts = outputs[output_key][idx]
         losses = {}
         if self.t_out_dim == 2:
             src_depths = outputs["center_depth"][idx]
@@ -754,9 +759,9 @@ class SetCriterion(nn.Module):
 
         return nocs_rt_losses
 
-    def calc_t_err_cm(self, outputs, targets, indices):
+    def calc_t_err_cm(self, outputs, targets, indices, output_key="t"):
         idx = self._get_src_permutation_idx(indices)
-        src_ts = outputs["t"][idx]
+        src_ts = outputs[output_key][idx]
         target_ts = [
             t[self.tgt_key_t][i]
             for t, (_, i) in zip(targets, indices)
@@ -814,6 +819,10 @@ class SetCriterion(nn.Module):
         if self.use_nocs:
             loss_map.update({
                 'nocs': self.loss_nocs,
+            })
+        if self.use_kpts:
+            loss_map.update({
+                'kpts': self.loss_kpts,
             })
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
         return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
