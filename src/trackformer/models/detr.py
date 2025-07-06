@@ -636,9 +636,35 @@ class SetCriterion(nn.Module):
         losses = {k: v.sum() / num_boxes for k, v in losses.items()}
         return losses
 
-    def calc_r_err_deg(self, outputs, targets, indices):
+    def loss_kpts(self, outputs, targets, indices, num_boxes):
+        """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
+        targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+        The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
+        """
+        indices = self.filter_out_idxs_for_rel_pose(targets, indices)
+
         idx = self._get_src_permutation_idx(indices)
-        src_rots = outputs["rot"][idx]
+
+        src_kpts = outputs["kpts"][idx]
+        target_kpts = (
+            [t["bbox_3d_kpts_proj"][i] for t, (_, i) in zip(targets, indices) if len(t["bbox_3d_kpts_proj"])>0]
+        )
+        target_sizes = (
+            [t["size"] for t, (_, i) in zip(targets, indices) if len(t["size"])>0]
+        )
+        if len(target_kpts)==0:
+            return {}
+        target_kpts = [kpts / size[None, :] for kpts, size in zip(target_kpts, target_sizes)]
+        target_kpts=torch.cat(target_kpts, dim=0).float()
+        losses = {}
+        loss_kpts = F.mse_loss(src_kpts, target_kpts, reduction="mean")
+
+        losses["loss_kpts"] = loss_kpts
+        return losses
+
+    def calc_r_err_deg(self, outputs, targets, indices, output_key="rot"):
+        idx = self._get_src_permutation_idx(indices)
+        src_rots = outputs[output_key][idx]
         target_rots = [
             t[self.tgt_key_rot][i]
             for t, (_, i) in zip(targets, indices)
