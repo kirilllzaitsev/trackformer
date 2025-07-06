@@ -72,6 +72,7 @@ def build_model(args, num_classes=None):
         "n_layers_f_transformer",
         "use_nocs",
         "use_nocs_pred",
+        "use_nocs_pose_pred",
     ]:
         if hasattr(args, k):
             detr_kwargs[k] = getattr(args, k)
@@ -150,6 +151,7 @@ def build_criterion(args, num_classes, matcher, device, use_rel_pose=False):
                    "loss_depth": getattr(args, "depth_loss_coef", 1),
                    "loss_t": getattr(args, "t_loss_coef", 1),
                    "loss_nocs": getattr(args, "nocs_loss_coef", 1),
+                   "loss_kpts": getattr(args, "kpts_loss_coef", 1),
                    }
                    
     losses = [
@@ -196,6 +198,8 @@ def build_criterion(args, num_classes, matcher, device, use_rel_pose=False):
         uncertainty_coef=args.uncertainty_coef,
         use_uncertainty=args.use_uncertainty,
         use_nocs=args.use_nocs,
+        use_kpts=args.use_kpts,
+        use_nocs_pose_pred=args.use_nocs_pose_pred,
     )
     criterion.to(device)
     return criterion

@@ -63,6 +63,7 @@ class DETR(nn.Module):
         n_layers_f_transformer=1,
         use_nocs=False,
         use_nocs_pred=False,
+        use_nocs_pose_pred=False,
     ):
         """Initializes the model.
         Parameters:
@@ -87,6 +88,7 @@ class DETR(nn.Module):
         self.use_render_token = use_render_token
         self.use_nocs = use_nocs
         self.use_nocs_pred = use_nocs_pred
+        self.use_nocs_pose_pred = use_nocs_pose_pred
         self.rot_out_dim = rot_out_dim
         self.t_out_dim = t_out_dim
         self.dropout = dropout
@@ -145,6 +147,7 @@ class DETR(nn.Module):
                 n_layers_f_transformer=n_layers_f_transformer,
                 use_nocs=use_nocs,
                 use_nocs_pred=use_nocs_pred,
+                use_nocs_pose_pred=use_nocs_pose_pred,
             )
 
         init_params(self, included_names=['rot_embed', 't_embed', 'depth_embed'])
@@ -310,6 +313,8 @@ class SetCriterion(nn.Module):
         uncertainty_coef=0.1,
         use_uncertainty=False,
         use_nocs=False,
+        use_kpts=False,
+        use_nocs_pose_pred=False,
     ):
         """Create the criterion.
         Parameters:
@@ -347,6 +352,7 @@ class SetCriterion(nn.Module):
         self.use_factors = factors is not None
         self.use_nocs = use_nocs
         self.use_kpts = use_kpts
+        self.use_nocs_pose_pred = use_nocs_pose_pred
         self.focal_alpha_confidence = 0.25
 
         if self.use_factors:
