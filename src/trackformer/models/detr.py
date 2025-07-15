@@ -5,6 +5,7 @@ DETR model and criterion classes.
 import copy
 import random
 
+from pose_tracking.utils.rotation_conversions import matrix_to_axis_angle
 import torch
 import torch.nn.functional as F
 from pose_tracking.losses import geodesic_loss_mat
