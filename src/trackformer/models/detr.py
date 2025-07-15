@@ -448,7 +448,7 @@ class SetCriterion(nn.Module):
         loss_ce = sigmoid_focal_loss(
             src_logits, target_classes_onehot, num_boxes,
             alpha=self.focal_alpha, gamma=self.focal_gamma)
-            # , query_mask=query_mask)
+        # , query_mask=query_mask)
 
         # if self.tracking:
         #     mean_num_queries = torch.tensor([len(m.nonzero()) for m in query_mask]).float().mean()
@@ -597,8 +597,8 @@ class SetCriterion(nn.Module):
                 factors["nocs_pred_rot"] = outputs["nocs_pred_rot"][idx]
                 factors["nocs_pred_t"] = outputs["nocs_pred_t"][idx]
                 factors.update({
-                    "nocs_pred_r_err": self.calc_r_err_deg(outputs, targets, indices, output_key="nocs_pred_rot").item(),
-                    "nocs_pred_t_err": self.calc_t_err_cm(outputs, targets, indices, output_key="nocs_pred_t").item()*1e-2,
+                    "nocs_pred_r_err": self.calc_r_err(outputs, targets, indices, output_key="nocs_pred_rot").item(),
+                    "nocs_pred_t_err": self.calc_t_err(outputs, targets, indices, output_key="nocs_pred_t").item()*1e-2,
                 })
         for f in self.factors:
             src_f_logits = outputs["factors"][f][idx].squeeze(-1)
@@ -666,7 +666,7 @@ class SetCriterion(nn.Module):
         losses["loss_kpts"] = loss_kpts
         return losses
 
-    def calc_r_err_deg(self, outputs, targets, indices, output_key="rot"):
+    def calc_r_err(self, outputs, targets, indices, output_key="rot", use_deg=False, use_axis_angle=False):
         idx = self._get_src_permutation_idx(indices)
         src_rots = outputs[output_key][idx]
         target_rots = [
@@ -679,13 +679,17 @@ class SetCriterion(nn.Module):
         target_rots = torch.cat(target_rots, dim=0)
         target_rot_mats = convert_rot_vector_to_matrix(target_rots)
         src_rot_mats = convert_rot_vector_to_matrix(src_rots).detach()
-        r_err_deg = geodesic_loss_mat(
-            src_rot_mats,
-            target_rot_mats,
-            sym_type="",
-            do_return_deg=True,
-            do_reduce=False,
-        )
+        if use_axis_angle:
+            R_rel = src_rot_mats.transpose(-1, -2) @ target_rot_mats
+            r_err_deg = matrix_to_axis_angle(R_rel)
+        else:
+            r_err_deg = geodesic_loss_mat(
+                src_rot_mats,
+                target_rot_mats,
+                sym_type="",
+                do_return_deg=use_deg,
+                do_reduce=False,
+            )
         return r_err_deg
 
     def filter_out_idxs_for_rel_pose(self, targets, indices):
@@ -789,7 +793,7 @@ class SetCriterion(nn.Module):
 
         return nocs_rt_losses
 
-    def calc_t_err_cm(self, outputs, targets, indices, output_key="t"):
+    def calc_t_err(self, outputs, targets, indices, output_key="t", use_cm=False):
         idx = self._get_src_permutation_idx(indices)
         src_ts = outputs[output_key][idx]
         target_ts = [
@@ -818,8 +822,10 @@ class SetCriterion(nn.Module):
             target_ts_3d = target_ts
         src_ts_3d = src_ts_3d.detach()
 
-        t_err_cm = calc_t_error(src_ts_3d, target_ts_3d, do_reduce=False) * 1e2
-        return t_err_cm
+        t_err = calc_t_error(src_ts_3d, target_ts_3d, do_reduce=False)
+        if use_cm:
+            t_err *= 1e2
+        return t_err
 
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
