@@ -981,21 +981,35 @@ class SetCriterion(nn.Module):
             loss_uncertainty = ce_loss
             loss_uncertainty_rt[k] = loss_uncertainty.mean()
 
-        r_err_deg = self.calc_r_err_deg(outputs, targets, indices)
-        t_err_cm = self.calc_t_err_cm(outputs, targets, indices)
+        # for monitoring
+        r_err_deg = self.calc_r_err(outputs, targets, indices, use_deg=True)
+        t_err_cm = self.calc_t_err(outputs, targets, indices, use_cm=True)
         r_conf_gt = error_to_confidence(r_err_deg, min_err=1.0, max_err=30.0)
         t_conf_gt = error_to_confidence(t_err_cm, min_err=1.0, max_err=15.0)
         idx = self._get_src_permutation_idx(indices)
         conf_rt_matched = self.get_uncertainty(outputs, idx)
-        prob_rt_matched = {
-            k: v.sigmoid().detach().mean() for k, v in conf_rt_matched.items()
-        }
+        if self.use_clf:
+            prob_rt_matched = {k: v.sigmoid() for k, v in conf_rt_matched.items()}
+        else:
+            rot_conf = conf_rt_matched["rot"]
+            if self.use_axis_angle:
+                rot_conf = rot_conf.abs().mean(dim=-1) * torch.pi
+            prob_rt_matched = {
+                "rot": error_to_confidence(
+                    rot_conf * 180 / torch.pi,
+                    min_err=1.0,
+                    max_err=30.0,
+                ),
+                "t": error_to_confidence(
+                    conf_rt_matched["t"] * 1e2, min_err=1.0, max_err=15.0
+                ),
+            }
+        prob_rt_matched = {k: v.detach().mean() for k, v in prob_rt_matched.items()}
         conf_r_matched = prob_rt_matched["rot"]
         conf_t_matched = prob_rt_matched["t"]
         confidence = 0.5 * (conf_r_matched + conf_t_matched)
         return {
-            "loss_uncertainty": 0.5
-            * (loss_uncertainty_rt["rot"] + loss_uncertainty_rt["t"]),
+            "loss_uncertainty": 0.5 * (loss_uncertainty_rt["rot"] + loss_uncertainty_rt["t"]),
             "confidence": confidence,
             "loss_uncertainty_rot": loss_uncertainty_rt["rot"],
             "loss_uncertainty_t": loss_uncertainty_rt["t"],
