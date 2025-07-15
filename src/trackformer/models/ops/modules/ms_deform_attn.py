@@ -18,8 +18,6 @@ class MSDeformAttn(nn.Module):
         assert d_model % n_heads == 0
 
         self.im2col_step = im2col_step
-        self.do_vis = do_vis
-        # self.do_vis = True
 
         self.d_model = d_model
         self.n_levels = n_levels
@@ -32,6 +30,9 @@ class MSDeformAttn(nn.Module):
         self.output_proj = nn.Linear(d_model, d_model)
 
         self._reset_parameters()
+
+        self.do_vis = True
+        self.do_vis = False
 
         if self.do_vis:
             self.outs={}
@@ -104,13 +105,10 @@ class MSDeformAttn(nn.Module):
             bidx=0
             point=(sampling_locations_vis[bidx,:,:,:,:,:])
             attention_weight=(attention_weights_vis[bidx,:,:,:,:])
-            # image = input_flatten[bidx, 0:input_spatial_shapes[0,0]*input_spatial_shapes[0,1], 0]
-            # image = image.view(input_spatial_shapes[0,0], input_spatial_shapes[0,1])
             self.outs.update({self.out_counter: {'point': point, 'attention_weight': attention_weight,
                                                  'input_flatten': input_flatten.detach().cpu(),
                                                  'input_spatial_shapes': input_spatial_shapes.detach().cpu()}})
             self.out_counter+=1
-            print(f"{self.out_counter=}")
                 
         output = MSDeformAttnFunction.apply(
             value, input_spatial_shapes, sampling_locations, attention_weights, self.im2col_step)
