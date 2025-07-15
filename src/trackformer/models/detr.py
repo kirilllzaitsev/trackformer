@@ -965,20 +965,41 @@ class SetCriterion(nn.Module):
                 indices_other[bidx] = (indices_other_bidx_pred, indices_other_bidx_gt)
         idx_all = self._get_src_permutation_idx(indices_other)
         conf_rt = self.get_uncertainty(outputs, idx_all)
-        r_err_deg_all = self.calc_r_err_deg(outputs, targets, indices_other)
-        t_err_cm_all = self.calc_t_err_cm(outputs, targets, indices_other)
-        r_conf_gt_all = error_to_confidence(r_err_deg_all, min_err=1.0, max_err=30.0)
-        t_conf_gt_all = error_to_confidence(t_err_cm_all, min_err=1.0, max_err=15.0)
+
+        if self.use_clf:
+            r_err_deg_all = self.calc_r_err(outputs, targets, indices_other, use_deg=True)
+            t_err_all = self.calc_t_err(outputs, targets, indices_other, use_cm=True)
+            r_conf_gt_all = error_to_confidence(r_err_deg_all, min_err=1.0, max_err=30.0)
+            t_conf_gt_all = error_to_confidence(t_err_all, min_err=1.0, max_err=15.0)
+        else:
+            r_err_deg_all = self.calc_r_err(outputs, targets, indices_other, use_deg=False, use_axis_angle=self.use_axis_angle)
+            t_err_all = self.calc_t_err(outputs, targets, indices_other, use_cm=False)
+            if self.use_axis_angle:
+                r_conf_gt_all = r_err_deg_all / torch.pi
+            else:
+                r_conf_gt_all = r_err_deg_all / (2 * torch.pi)
+            t_conf_gt_all = t_err_all.clamp(min=0, max=0.15)
+
         loss_uncertainty_rt = {}
         for k, conf_one in conf_rt.items():
             gt_confidence = r_conf_gt_all if k == "rot" else t_conf_gt_all
 
-            targets_one = gt_confidence.float().clamp(min=eps, max=1 - eps)
-            ce_loss = F.binary_cross_entropy_with_logits(
-                conf_one, targets_one, reduction="none"
-            )
-            prob_one = conf_one.sigmoid()
-            loss_uncertainty = ce_loss
+            if self.use_clf:
+                targets_one = gt_confidence.float().clamp(min=eps, max=1 - eps)
+                ce_loss = F.binary_cross_entropy_with_logits(
+                    conf_one, targets_one, reduction="none"
+                )
+                prob_one = conf_one.sigmoid()
+                loss_uncertainty = ce_loss
+            else:
+                targets_one = gt_confidence
+                if k == "rot":
+                    targets_one = targets_one
+                else:
+                    targets_one = targets_one
+                loss_uncertainty = F.l1_loss(
+                    conf_one, targets_one, reduction="none"
+                )
             loss_uncertainty_rt[k] = loss_uncertainty.mean()
 
         # for monitoring
@@ -994,6 +1015,8 @@ class SetCriterion(nn.Module):
             rot_conf = conf_rt_matched["rot"]
             if self.use_axis_angle:
                 rot_conf = rot_conf.abs().mean(dim=-1) * torch.pi
+            else:
+                rot_conf = rot_conf * 2 * torch.pi
             prob_rt_matched = {
                 "rot": error_to_confidence(
                     rot_conf * 180 / torch.pi,
