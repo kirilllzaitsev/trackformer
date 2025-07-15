@@ -1008,10 +1008,15 @@ class SetCriterion(nn.Module):
         }
 
     def get_uncertainty(self, outputs, idx):
-        # log_var = outputs["uncertainty"][idx][:, None].clamp(min=-10, max=0)
-        # var = torch.exp(log_var)
         conf_rot = outputs["uncertainty_rot"][idx][:]
         conf_t = outputs["uncertainty_t"][idx][:]
+        if not self.use_clf:
+            # confs are normalized errors
+            if self.use_axis_angle:
+                conf_rot = conf_rot.tanh()
+            else:
+                conf_rot = conf_rot.sigmoid()
+            conf_t = conf_t.sigmoid()
         return {"rot": conf_rot, "t": conf_t}
 
 
