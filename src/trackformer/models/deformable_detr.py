@@ -47,6 +47,7 @@ class DeformableDETR(DETR):
                 use_nocs=False,
                 use_nocs_pred=False,
                 use_nocs_pose_pred=False,
+                use_spherical_nocs=False,
                 ):
         """ Initializes the model.
         Parameters:
@@ -73,6 +74,7 @@ class DeformableDETR(DETR):
                         use_nocs=use_nocs,
                         use_nocs_pred=use_nocs_pred,
                         use_nocs_pose_pred=use_nocs_pose_pred,
+                        use_spherical_nocs=use_spherical_nocs,
 )
 
         self.merge_frame_features = merge_frame_features

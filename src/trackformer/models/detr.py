@@ -64,6 +64,7 @@ class DETR(nn.Module):
         use_nocs=False,
         use_nocs_pred=False,
         use_nocs_pose_pred=False,
+        use_spherical_nocs=False,
     ):
         """Initializes the model.
         Parameters:
@@ -85,10 +86,6 @@ class DETR(nn.Module):
         self.use_pose = use_pose
         self.use_uncertainty = use_uncertainty
         self.use_pose_tokens = use_pose_tokens
-        self.use_render_token = use_render_token
-        self.use_nocs = use_nocs
-        self.use_nocs_pred = use_nocs_pred
-        self.use_nocs_pose_pred = use_nocs_pose_pred
         self.rot_out_dim = rot_out_dim
         self.t_out_dim = t_out_dim
         self.dropout = dropout
@@ -148,6 +145,7 @@ class DETR(nn.Module):
                 use_nocs=use_nocs,
                 use_nocs_pred=use_nocs_pred,
                 use_nocs_pose_pred=use_nocs_pose_pred,
+                use_spherical_nocs=use_spherical_nocs,
             )
 
         init_params(self, included_names=['rot_embed', 't_embed', 'depth_embed'])
@@ -372,6 +370,12 @@ class SetCriterion(nn.Module):
             self.tgt_key_t += "_rel"
         else:
             self.tgt_key_rot = "rot"
+
+        self.use_clf=True
+        self.use_clf=False
+
+        self.use_axis_angle=False
+        self.use_axis_angle=True
 
     def __repr__(self):
         return print_cls(self, extra_str=super().__repr__())

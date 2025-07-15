@@ -73,6 +73,7 @@ def build_model(args, num_classes=None):
         "use_nocs",
         "use_nocs_pred",
         "use_nocs_pose_pred",
+        "use_spherical_nocs",
     ]:
         if hasattr(args, k):
             detr_kwargs[k] = getattr(args, k)
